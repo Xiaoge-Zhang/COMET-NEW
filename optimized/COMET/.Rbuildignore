@@ -1,0 +1,13 @@
+^.*\.Rproj$
+^\.Rproj\.user$
+^README\.Rmd$
+^LICENSE\.md$
+^CITATION\.cff$
+R/tests.R
+R/checkers.R
+R/sims_compar.R
+R/cas2.R
+R/data_loader.R
+R/data_sifter.R
+R/checkers.R
+R/new_implements.R
