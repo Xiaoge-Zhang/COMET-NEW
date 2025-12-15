@@ -1,0 +1,17 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+src/*.o
+src/*.so
+src/*.dll
+R/data_loader.R
+R/data_sifter.R
+R/sims_compar.R
+R/new_implements.R
+R/checkers.R
+R/cas2.R
+R/tests.R
+R/simulation_eval.R
+R/checkers.R
+README_cache
