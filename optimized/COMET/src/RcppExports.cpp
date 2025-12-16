@@ -12,7 +12,7 @@ Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 
 // expected_survival
 NumericVector expected_survival(NumericVector lp, NumericVector surv_rate);
-RcppExport SEXP _COMET_expected_survival(SEXP lpSEXP, SEXP surv_rateSEXP) {
+RcppExport SEXP _COMETopt_expected_survival(SEXP lpSEXP, SEXP surv_rateSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -24,11 +24,11 @@ END_RCPP
 }
 
 static const R_CallMethodDef CallEntries[] = {
-    {"_COMET_expected_survival", (DL_FUNC) &_COMET_expected_survival, 2},
+    {"_COMETopt_expected_survival", (DL_FUNC) &_COMETopt_expected_survival, 2},
     {NULL, NULL, 0}
 };
 
-RcppExport void R_init_COMET(DllInfo *dll) {
+RcppExport void R_init_COMETopt(DllInfo *dll) {
     R_registerRoutines(dll, NULL, CallEntries, NULL, NULL);
     R_useDynamicSymbols(dll, FALSE);
 }

@@ -13,6 +13,6 @@ NULL
 ## usethis namespace: end
 NULL
 ## usethis namespace: start
-#' @useDynLib COMET, .registration = TRUE
+#' @useDynLib COMETopt, .registration = TRUE
 ## usethis namespace: end
 NULL

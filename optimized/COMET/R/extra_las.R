@@ -25,42 +25,62 @@ rmst.character <- function(object, cand_data, cap = NA, wl = TRUE, ...){
 
   model <- match.arg(toupper(object), c("LAS15", "LAS21", "CAS23"))
   if(wl){
-  switch(model,
-         LAS15 = {
-           surv <- wl_las15_survrates
-           f1 <- calc_wl_las15
-         },
-         LAS21 = {
-           surv <- wl_las21_survrates
-           f1 <- calc_wl_las21
-         },
-         CAS23 = {
-           surv <- wl_cas23_survrates
-           f1 <- calc_wl_cas23
-         }
-  )
+    switch(model,
+           LAS15 = {
+             surv <- wl_las15_survrates
+             f1 <- calc_wl_las15
+           },
+           LAS21 = {
+             surv <- wl_las21_survrates
+             f1 <- calc_wl_las21
+           },
+           CAS23 = {
+             surv <- wl_cas23_survrates
+             f1 <- calc_wl_cas23
+           }
+    )
   }else{
-  switch(model,
-         LAS15 = {
-           surv <- post_tx_las15_survrates
-           f1 <- calc_post_tx_las15
-         },
-         LAS21 = {
-           surv <- post_tx_las21_survrates
-           f1 <- calc_post_tx_las21
-         },
-         CAS23 = {
-           surv <- post_tx_cas23_survrates
-           f1 <- calc_post_tx_cas23
-         }
-  )
+    switch(model,
+           LAS15 = {
+             surv <- post_tx_las15_survrates
+             f1 <- calc_post_tx_las15
+           },
+           LAS21 = {
+             surv <- post_tx_las21_survrates
+             f1 <- calc_post_tx_las21
+           },
+           CAS23 = {
+             surv <- post_tx_cas23_survrates
+             f1 <- calc_post_tx_cas23
+           }
+    )
   }
 
   if(is.na(cap)){cap <- max(surv$Days)}
 
   surv <- filter(surv, .data$Days <= cap)
-  surv1 <- f1(cand_data) |>
-    mutate(expected = expected_survival(.data$lp, surv$Survival))
+
+
+  ## ------------------------------------------------------------
+  ## 🕒 Start timer
+  start_time <- Sys.time()
+  ## ------------------------------------------------------------
+
+  # Compute f1 output first
+  surv1 <- f1(cand_data)
+
+  # Then add the expected column with a vectorized C++ call
+  surv1$expected <- expected_survival(surv1$lp, surv$Survival)
+
+  #surv1 <- f1(cand_data) |>
+  #mutate(expected = expected_survival(.data$lp, surv$Survival))
+
+  ## ------------------------------------------------------------
+  ## 🕒 End timer and report
+  end_time <- Sys.time()
+  elapsed <- as.numeric(difftime(end_time, start_time, units = "secs"))
+  # message(sprintf("[rmst.character] expected_survival() runtime: %.4f seconds", elapsed))
+  ## ------------------------------------------------------------
   return(surv1)
 }
 
