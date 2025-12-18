@@ -64,6 +64,31 @@ simulation_parallelization <- function(
   if (is.null(seeds)) {
     # if the caller wants reproducible seeds, they can call set.seed() before
     seeds <- sample.int(1e8, n_runs)
+
+  } else if (length(seeds) == 1L) {
+    # single seed provided: generate a deterministic seed set for all runs
+    if (!is.numeric(seeds) || is.na(seeds)) stop("'seeds' must be a non-NA numeric value.")
+    master_seed <- as.integer(seeds)
+
+    old_seed <- if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)) {
+      get(".Random.seed", envir = .GlobalEnv, inherits = FALSE)
+    } else {
+      NULL
+    }
+
+    on.exit({
+      if (is.null(old_seed)) {
+        if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)) {
+          rm(".Random.seed", envir = .GlobalEnv, inherits = FALSE)
+        }
+      } else {
+        assign(".Random.seed", old_seed, envir = .GlobalEnv)
+      }
+    }, add = TRUE)
+
+    set.seed(master_seed)
+    seeds <- sample.int(1e8, n_runs)
+
   } else {
     if (length(seeds) != n_runs) {
       stop("Length of 'seeds' (", length(seeds),
