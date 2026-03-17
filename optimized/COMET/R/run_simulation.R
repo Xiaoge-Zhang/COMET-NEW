@@ -32,7 +32,7 @@
 #'  }
 #'  }
 run_simulation <- function(days, can_start = 1250,
-                           match_alg = match_cas(),
+                           match_alg = match_cas,
                            ...,
                            seed = NULL, desired = "random", return_params = FALSE, include_matches = FALSE){
 
@@ -40,7 +40,7 @@ run_simulation <- function(days, can_start = 1250,
 
   call1 <- match.call(expand.dots = TRUE)
 
-  set.seed(seed = seed)
+  if (!is.null(seed)) set.seed(as.integer(seed))
   ## overall timer start
   tic_overall <- Sys.time()
 
