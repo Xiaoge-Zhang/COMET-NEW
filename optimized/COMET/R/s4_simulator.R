@@ -277,6 +277,8 @@ setMethod("run", "COMETSimulator", function(simulator) {
   ## 5) Timing summary (same as your previous OOP wrapper)
   ## -------------------------------------------------------
   timing_df <- do.call(rbind, lapply(daily_timings, as.data.frame))
+  print(names(timing_df))
+  print(head(timing_df))
   summary_timing <- timing_df |>
     dplyr::summarise(
       total_pre_tx = sum(.data$pre_tx_update, na.rm = TRUE),
