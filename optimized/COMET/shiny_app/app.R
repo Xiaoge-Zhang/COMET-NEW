@@ -21,75 +21,165 @@ options(
   comet.s4_simulator_path = s4_simulator_path
 )
 
-ui <- fluidPage(
-  useShinyjs(),
-  titlePanel("COMET Simulator"),
+ui <- navbarPage(
+  "COMET Simulator",
 
-  sidebarLayout(
-    sidebarPanel(
-      h4("Simulation Settings"),
+  header = tagList(
+    useShinyjs()
+  ),
 
-      numericInput("days", "Simulation days", value = 30, min = 1),
-      numericInput("seed", "Seed", value = 123),
-      numericInput("can_start", "Initial candidate count", value = 1250, min = 0),
-      selectInput("desired", "Desired strategy", choices = c("random", "mean"), selected = "random"),
+  tabPanel(
+    "Run Experiment",
+    fluidPage(
+      fluidRow(
+        column(
+          width = 4,
 
-      checkboxInput("include_matches", "Include matches", value = FALSE),
-      checkboxInput("return_params", "Return parameters", value = FALSE),
+          h3("Experiment Settings"),
+          textInput("experiment_label", "Experiment label", value = "Experiment 1"),
+          numericInput("n_runs", "Number of runs", value = 1, min = 1, step = 1),
+          checkboxInput("parallel", "Run in parallel", value = FALSE),
+          numericInput("workers", "Workers (used only if parallel)", value = 2, min = 1, step = 1),
+          helpText("If Number of runs = 1, the app behaves like a single simulation."),
 
-      tags$hr(),
-      h4("Experiment Settings"),
-      numericInput("n_runs", "Number of runs", value = 1, min = 1, step = 1),
-      checkboxInput("parallel", "Run in parallel", value = FALSE),
-      numericInput("workers", "Workers (used only if parallel)", value = 2, min = 1, step = 1),
-      helpText("If Number of runs = 1, the app behaves like a single simulation."),
+          tags$hr(),
 
-      selectInput(
-        "policy_type",
-        "Policy type",
-        choices = c("CAS23", "LAS15", "LAS21"),
-        selected = "CAS23"
-      ),
+          h3("Simulation Settings"),
+          numericInput("days", "Simulation days", value = 30, min = 1),
+          numericInput("seed", "Seed", value = 123),
+          numericInput("can_start", "Initial candidate count", value = 1250, min = 0),
+          selectInput("desired", "Desired strategy", choices = c("random", "mean"), selected = "random"),
+          checkboxInput("include_matches", "Include matches", value = FALSE),
+          checkboxInput("return_params", "Return parameters", value = FALSE),
 
-      tags$hr(),
-      h4("Policy Parameters"),
-      uiOutput("policy_params_ui"),
+          tags$hr(),
 
-      actionButton("run_sim", "Run Simulation"),
-      br(), br(),
-      htmlOutput("run_status")
-    ),
+          h3("Policy Settings"),
+          selectInput(
+            "policy_type",
+            "Policy type",
+            choices = c("CAS23", "LAS15", "LAS21"),
+            selected = "CAS23"
+          ),
+          uiOutput("policy_params_ui"),
 
-    mainPanel(
+          tags$br(),
+          actionButton("run_save_exp", "Run and Save Experiment"),
+          tags$br(),
+          tags$br(),
+          htmlOutput("run_status")
+        ),
+
+        column(
+          width = 8,
+          h3("Run Instructions"),
+          tags$p("Configure the experiment on the left, then click 'Run and Save Experiment'."),
+          tags$p("After the run finishes, inspect outputs in the Results tab."),
+          tags$p("Saved experiments can be managed in the Saved Experiments tab and compared in the Compare Experiments tab.")
+        )
+      )
+    )
+  ),
+
+  tabPanel(
+    "Results",
+    fluidPage(
+
       conditionalPanel(
-        condition = "input.n_runs > 1",
+        condition = "!output.has_result",
         tags$div(
-          style = "margin-bottom: 15px;",
-          selectInput("selected_run", "Select run to inspect", choices = NULL)
+          style = "margin-top: 30px; font-size: 16px; color: #666;",
+          "No experiment loaded yet. Please run or load an experiment first."
         )
       ),
-      tabsetPanel(
-        tabPanel("Experiment Summary",
-                 verbatimTextOutput("experiment_summary_out"),
-                 tableOutput("experiment_metrics_table")
-        ),
-        tabPanel("Summary",
-                 verbatimTextOutput("summary_out")
-        ),
 
-        tabPanel("Wait Time",
-                 plotOutput("wait_time_plot"),
-                 verbatimTextOutput("wait_time_stats")
-        ),
+      conditionalPanel(
+        condition = "output.has_result",
+        tagList(
 
-        tabPanel("Post-Transplant Survival",
-                 plotOutput("survival_curve"),
-                 plotOutput("survival_hist"),
-                 verbatimTextOutput("survival_stats")
-        ),
+          conditionalPanel(
+            condition = "output.has_exp_result",
+            tags$div(
+              style = "margin-bottom: 15px;",
+              selectInput("selected_run", "Select run to inspect", choices = NULL)
+            )
+          ),
 
-        tabPanel("Outcome Composition",
-                 plotOutput("outcome_plot")
+          tabsetPanel(
+            tabPanel(
+              "Experiment Summary",
+              verbatimTextOutput("experiment_summary_out"),
+              tableOutput("experiment_metrics_table")
+            ),
+            tabPanel(
+              "Summary",
+              verbatimTextOutput("summary_out")
+            ),
+            tabPanel(
+              "Wait Time",
+              plotOutput("wait_time_plot"),
+              verbatimTextOutput("wait_time_stats")
+            ),
+            tabPanel(
+              "Post-Transplant Survival",
+              plotOutput("survival_curve"),
+              plotOutput("survival_hist"),
+              verbatimTextOutput("survival_stats")
+            ),
+            tabPanel(
+              "Outcome Composition",
+              plotOutput("outcome_plot")
+            )
+          )
+        )
+      )
+    )
+  ),
+
+  tabPanel(
+    "Saved Experiments",
+    fluidPage(
+      fluidRow(
+        column(
+          width = 4,
+          h3("Load Saved Experiment"),
+          selectInput("saved_experiment", "Load saved experiment", choices = c()),
+          actionButton("load_saved_exp", "Load Selected Experiment")
+        ),
+        column(
+          width = 8,
+          h3("Saved Experiment Registry"),
+          tableOutput("saved_experiments_table")
+        )
+      )
+    )
+  ),
+
+  tabPanel(
+    "Compare Experiments",
+    fluidPage(
+      fluidRow(
+        column(
+          width = 4,
+          h3("Comparison Settings"),
+          selectInput("compare_exp_1", "Experiment 1", choices = c()),
+          selectInput("compare_exp_2", "Experiment 2", choices = c()),
+          selectInput(
+            "compare_metric",
+            "Metric to compare",
+            choices = c(
+              "Total transplants" = "total_transplants",
+              "Waitlist deaths" = "waitlist_deaths",
+              "Post-transplant deaths" = "post_tx_deaths",
+              "Unused donors" = "non_used_donors"
+            )
+          )
+        ),
+        column(
+          width = 8,
+          h3("Comparison Results"),
+          tableOutput("comparison_summary_table"),
+          plotOutput("comparison_boxplot")
         )
       )
     )
@@ -99,11 +189,23 @@ ui <- fluidPage(
 server <- function(input, output, session) {
 
   rv <- reactiveValues(
-    result = NULL,          # currently selected COMETResult for plots/summary
-    exp_result = NULL,      # COMETExperimentResult if n_runs > 1
+    result = NULL,
+    exp_result = NULL,
     status = "Ready.",
-    running = FALSE
+    running = FALSE,
+    experiments = list(),
+    active_experiment_id = NULL
   )
+
+  output$has_result <- reactive({
+    !is.null(rv$result)
+  })
+  outputOptions(output, "has_result", suspendWhenHidden = FALSE)
+
+  output$has_exp_result <- reactive({
+    !is.null(rv$exp_result)
+  })
+  outputOptions(output, "has_exp_result", suspendWhenHidden = FALSE)
 
   observe({
     shinyjs::disable("parallel")
@@ -114,13 +216,13 @@ server <- function(input, output, session) {
 
     if (input$policy_type == "CAS23") {
       tagList(
-        selectInput("match_alg_cas", "Matching algorithm",
+        selectInput("match_alg", "Matching algorithm",
                     choices = c("match_cas"), selected = "match_cas"),
 
-        selectInput("wl_model_cas", "Waitlist model",
+        selectInput("wl_model", "Waitlist model",
                     choices = c("CAS23"), selected = "CAS23"),
 
-        selectInput("post_tx_model_cas", "Post-transplant model",
+        selectInput("post_tx_model", "Post-transplant model",
                     choices = c("CAS23"), selected = "CAS23"),
 
         numericInput("wl_weight", "Waitlist weight", value = 0.25, min = 0, step = 0.01),
@@ -142,13 +244,13 @@ server <- function(input, output, session) {
       )
     } else {
       tagList(
-        selectInput("match_alg_las", "Matching algorithm",
+        selectInput("match_alg", "Matching algorithm",
                     choices = c("match_las"), selected = "match_las"),
 
-        selectInput("wl_model_las", "Waitlist model",
+        selectInput("wl_model", "Waitlist model",
                     choices = c("LAS15", "LAS21"), selected = input$policy_type),
 
-        selectInput("post_tx_model_las", "Post-transplant model",
+        selectInput("post_tx_model", "Post-transplant model",
                     choices = c("LAS15", "LAS21"), selected = input$policy_type),
 
         numericInput("wl_weight", "Waitlist weight", value = 0.25, min = 0, step = 0.01),
@@ -161,49 +263,167 @@ server <- function(input, output, session) {
     }
   })
 
-  build_policy <- reactive({
-
-    if (input$policy_type == "CAS23") {
+  make_policy <- function(policy_type, params, name = "Policy") {
+    if (policy_type == "CAS23") {
       CASPolicy(
-        name = "CAS policy",
+        name = name,
         params = list(
-          match_alg = input$match_alg_cas,
-          wl_model = input$wl_model_cas,
-          post_tx_model = input$post_tx_model_cas,
-          wl_weight = input$wl_weight,
-          wl_cap = input$wl_cap,
-          post_tx_weight = input$post_tx_weight,
-          post_tx_cap = input$post_tx_cap,
-          bio_weight = input$bio_weight,
-          peds_weight = input$peds_weight,
-          pld_weight = input$pld_weight,
-          efficiency_weight = input$efficiency_weight,
-          abo_weight = input$abo_weight,
-          height_weight = input$height_weight,
-          cpra_weight = input$cpra_weight,
-          cost_weight = input$cost_weight,
-          distance_weight = input$distance_weight,
-          checks = input$checks
+          match_alg = params$match_alg,
+          wl_model = params$wl_model,
+          post_tx_model = params$post_tx_model,
+          wl_weight = params$wl_weight,
+          wl_cap = params$wl_cap,
+          post_tx_weight = params$post_tx_weight,
+          post_tx_cap = params$post_tx_cap,
+          bio_weight = params$bio_weight,
+          peds_weight = params$peds_weight,
+          pld_weight = params$pld_weight,
+          efficiency_weight = params$efficiency_weight,
+          abo_weight = params$abo_weight,
+          height_weight = params$height_weight,
+          cpra_weight = params$cpra_weight,
+          cost_weight = params$cost_weight,
+          distance_weight = params$distance_weight,
+          checks = params$checks
         )
       )
     } else {
       LASPolicy(
-        name = "LAS policy",
+        name = name,
         params = list(
-          match_alg = input$match_alg_las,
-          wl_model = input$wl_model_las,
-          post_tx_model = input$post_tx_model_las,
-          wl_weight = input$wl_weight,
-          wl_cap = input$wl_cap,
-          post_tx_weight = input$post_tx_weight,
-          post_tx_cap = input$post_tx_cap,
-          checks = input$checks
+          match_alg = params$match_alg,
+          wl_model = params$wl_model,
+          post_tx_model = params$post_tx_model,
+          wl_weight = params$wl_weight,
+          wl_cap = params$wl_cap,
+          post_tx_weight = params$post_tx_weight,
+          post_tx_cap = params$post_tx_cap,
+          checks = params$checks
         )
+      )
+    }
+  }
+
+  refresh_experiment_selectors <- function(selected_saved = NULL,
+                                           selected_compare_1 = NULL,
+                                           selected_compare_2 = NULL) {
+
+    exp_choices <- setNames(
+      names(rv$experiments),
+      vapply(rv$experiments, function(x) {
+        paste0(x$label, " | ", x$policy_type, " | runs=", x$n_runs)
+      }, character(1))
+    )
+
+    updateSelectInput(
+      session,
+      "saved_experiment",
+      choices = exp_choices,
+      selected = selected_saved
+    )
+
+    updateSelectInput(
+      session,
+      "compare_exp_1",
+      choices = exp_choices,
+      selected = selected_compare_1
+    )
+
+    updateSelectInput(
+      session,
+      "compare_exp_2",
+      choices = exp_choices,
+      selected = selected_compare_2
+    )
+  }
+
+  current_policy_params <- reactive({
+    if (input$policy_type == "CAS23") {
+      list(
+        match_alg = input$match_alg,
+        wl_model = input$wl_model,
+        post_tx_model = input$post_tx_model,
+        wl_weight = input$wl_weight,
+        wl_cap = input$wl_cap,
+        post_tx_weight = input$post_tx_weight,
+        post_tx_cap = input$post_tx_cap,
+        bio_weight = input$bio_weight,
+        peds_weight = input$peds_weight,
+        pld_weight = input$pld_weight,
+        efficiency_weight = input$efficiency_weight,
+        abo_weight = input$abo_weight,
+        height_weight = input$height_weight,
+        cpra_weight = input$cpra_weight,
+        cost_weight = input$cost_weight,
+        distance_weight = input$distance_weight,
+        checks = input$checks
+      )
+    } else {
+      list(
+        match_alg = input$match_alg,
+        wl_model = input$wl_model,
+        post_tx_model = input$post_tx_model,
+        wl_weight = input$wl_weight,
+        wl_cap = input$wl_cap,
+        post_tx_weight = input$post_tx_weight,
+        post_tx_cap = input$post_tx_cap,
+        checks = input$checks
       )
     }
   })
 
-  observeEvent(input$run_sim, {
+  build_policy <- reactive({
+    make_policy(
+      policy_type = input$policy_type,
+      params = current_policy_params(),
+      name = paste(input$policy_type, "policy")
+    )
+  })
+
+  make_experiment_record <- function(label, cfg, policy_type, policy_params, n_runs,
+                                     result = NULL, exp_result = NULL) {
+    id <- paste0("exp_", format(Sys.time(), "%Y%m%d_%H%M%S"))
+
+    list(
+      id = id,
+      label = label,
+      created_at = Sys.time(),
+      config = cfg,
+      policy_type = policy_type,
+      policy_params = policy_params,
+      n_runs = n_runs,
+      result = result,
+      exp_result = exp_result
+    )
+  }
+
+  get_experiment_metrics_df <- function(rec) {
+    if (!is.null(rec$exp_result)) {
+      df <- experimentMetrics(rec$exp_result)
+
+      keep <- intersect(
+        c("total_transplants", "waitlist_deaths", "post_tx_deaths", "non_used_donors"),
+        names(df)
+      )
+
+      df[, keep, drop = FALSE]
+
+    } else if (!is.null(rec$result)) {
+      m <- metrics(rec$result)
+
+      data.frame(
+        total_transplants = as.numeric(m[["total_transplants"]]),
+        waitlist_deaths = as.numeric(m[["waitlist_deaths"]]),
+        post_tx_deaths = as.numeric(m[["post_tx_deaths"]]),
+        non_used_donors = as.numeric(m[["non_used_donors"]]),
+        stringsAsFactors = FALSE
+      )
+    } else {
+      NULL
+    }
+  }
+
+  observeEvent(input$run_save_exp, {
     req(!rv$running)
 
     rv$running <- TRUE
@@ -211,13 +431,13 @@ server <- function(input, output, session) {
     rv$result <- NULL
     rv$exp_result <- NULL
 
-    shinyjs::disable("run_sim")
-    shinyjs::html("run_sim", "Running...")
+    shinyjs::disable("run_save_exp")
+    shinyjs::html("run_save_exp", "Running...")
 
     on.exit({
       rv$running <- FALSE
-      shinyjs::enable("run_sim")
-      shinyjs::html("run_sim", "Run Simulation")
+      shinyjs::enable("run_save_exp")
+      shinyjs::html("run_save_exp", "Run and Save Experiment")
     }, add = TRUE)
 
     tryCatch({
@@ -237,6 +457,9 @@ server <- function(input, output, session) {
         policy = pol
       )
 
+      saved_result <- NULL
+      saved_exp_result <- NULL
+
       withProgress(message = "Running COMET simulation...", value = 0, {
 
         incProgress(0.15, detail = "Building simulator")
@@ -245,7 +468,10 @@ server <- function(input, output, session) {
         if (input$n_runs <= 1) {
 
           incProgress(0.5, detail = "Executing single simulation")
-          rv$result <- run(sim)
+          saved_result <- run(sim)
+          saved_exp_result <- NULL
+
+          rv$result <- saved_result
           rv$exp_result <- NULL
 
           incProgress(0.95, detail = "Finalizing output")
@@ -266,11 +492,13 @@ server <- function(input, output, session) {
           )
 
           incProgress(0.6, detail = "Executing experiment")
-          rv$exp_result <- runExperiment(exp)
+          saved_exp_result <- runExperiment(exp)
+          saved_result <- getResults(saved_exp_result)[[1]]
 
-          # Default selected result for downstream plots/tabs
-          res_tbl <- getResultTable(rv$exp_result)
-          rv$result <- getResults(rv$exp_result)[[1]]
+          rv$exp_result <- saved_exp_result
+          rv$result <- saved_result
+
+          res_tbl <- getResultTable(saved_exp_result)
 
           updateSelectInput(
             session,
@@ -288,23 +516,162 @@ server <- function(input, output, session) {
         incProgress(1)
       })
 
+      rec <- make_experiment_record(
+        label = input$experiment_label,
+        cfg = cfg,
+        policy_type = input$policy_type,
+        policy_params = current_policy_params(),
+        n_runs = input$n_runs,
+        result = saved_result,
+        exp_result = saved_exp_result
+      )
+
+      rv$experiments[[rec$id]] <- rec
+      rv$active_experiment_id <- rec$id
+
+      existing_ids <- names(rv$experiments)
+
+      default_compare_1 <- rec$id
+
+      default_compare_2 <- if (length(existing_ids) >= 2) {
+        existing_ids[existing_ids != rec$id][1]
+      } else {
+        rec$id
+      }
+
+      refresh_experiment_selectors(
+        selected_saved = rec$id,
+        selected_compare_1 = default_compare_1,
+        selected_compare_2 = default_compare_2
+      )
+
     }, error = function(e) {
       rv$status <- paste("Error:", conditionMessage(e))
       print(e)
     })
   })
 
+  observeEvent(input$load_saved_exp, {
+    req(input$saved_experiment)
+    req(input$saved_experiment %in% names(rv$experiments))
+
+    rec <- rv$experiments[[input$saved_experiment]]
+
+    rv$active_experiment_id <- rec$id
+    rv$result <- rec$result
+    rv$exp_result <- rec$exp_result
+
+    if (!is.null(rec$exp_result)) {
+      res_tbl <- getResultTable(rec$exp_result)
+
+      updateSelectInput(
+        session,
+        "selected_run",
+        choices = as.character(res_tbl$run_id),
+        selected = "1"
+      )
+    } else {
+      updateSelectInput(
+        session,
+        "selected_run",
+        choices = character(0),
+        selected = character(0)
+      )
+    }
+
+    rv$status <- paste("Loaded saved experiment:", rec$label)
+  })
+
   observeEvent(input$selected_run, {
     req(rv$exp_result)
-    req(input$n_runs > 1)
+
+    res_list <- getResults(rv$exp_result)
+    req(length(res_list) > 0)
 
     idx <- suppressWarnings(as.integer(input$selected_run))
     req(!is.na(idx))
-
-    res_list <- getResults(rv$exp_result)
     req(idx >= 1, idx <= length(res_list))
 
     rv$result <- res_list[[idx]]
+  })
+
+  comparison_records <- reactive({
+    req(input$compare_exp_1, input$compare_exp_2)
+    req(input$compare_exp_1 %in% names(rv$experiments))
+    req(input$compare_exp_2 %in% names(rv$experiments))
+
+    list(
+      exp1 = rv$experiments[[input$compare_exp_1]],
+      exp2 = rv$experiments[[input$compare_exp_2]]
+    )
+  })
+
+  comparison_summary_table <- reactive({
+    comps <- comparison_records()
+
+    rec1 <- comps$exp1
+    rec2 <- comps$exp2
+
+    df1 <- get_experiment_metrics_df(rec1)
+    df2 <- get_experiment_metrics_df(rec2)
+
+    req(!is.null(df1), !is.null(df2))
+
+    metric_names <- intersect(names(df1), names(df2))
+    metric_names <- metric_names[metric_names %in% c(
+      "total_transplants",
+      "waitlist_deaths",
+      "post_tx_deaths",
+      "non_used_donors"
+    )]
+
+    metric_label <- function(x) {
+      switch(
+        x,
+        total_transplants = "Total transplants",
+        waitlist_deaths = "Waitlist deaths",
+        post_tx_deaths = "Post-transplant deaths",
+        non_used_donors = "Unused donors",
+        x
+      )
+    }
+
+    mean_or_value <- function(df, col) {
+      mean(df[[col]], na.rm = TRUE)
+    }
+
+    data.frame(
+      metric = vapply(metric_names, metric_label, character(1)),
+      experiment_1 = vapply(metric_names, function(m) mean_or_value(df1, m), numeric(1)),
+      experiment_2 = vapply(metric_names, function(m) mean_or_value(df2, m), numeric(1)),
+      difference = vapply(metric_names, function(m) {
+        mean_or_value(df1, m) - mean_or_value(df2, m)
+      }, numeric(1)),
+      stringsAsFactors = FALSE
+    )
+  })
+
+  comparison_plot_df <- reactive({
+    comps <- comparison_records()
+
+    rec1 <- comps$exp1
+    rec2 <- comps$exp2
+
+    df1 <- get_experiment_metrics_df(rec1)
+    df2 <- get_experiment_metrics_df(rec2)
+
+    req(!is.null(df1), !is.null(df2))
+    req(input$compare_metric %in% names(df1))
+    req(input$compare_metric %in% names(df2))
+
+    data.frame(
+      value = c(df1[[input$compare_metric]], df2[[input$compare_metric]]),
+      experiment = c(
+        rep(rec1$label, nrow(df1)),
+        rep(rec2$label, nrow(df2))
+      ),
+      stringsAsFactors = FALSE
+    )
   })
 
   # -----------------------------
@@ -384,10 +751,10 @@ server <- function(input, output, session) {
   })
 
   output$survival_curve <- renderPlot({
-    sd <- survival_days_data()
+    surv_days <- survival_days_data()
 
     hist(
-      sd,
+      surv_days,
       breaks = 30,
       probability = TRUE,
       col = "darkgreen",
@@ -396,15 +763,15 @@ server <- function(input, output, session) {
       xlab = "Days survived after transplant"
     )
 
-    lines(density(sd), lwd = 2)
-    abline(v = mean(sd), lty = 2, lwd = 2)
+    lines(density(surv_days), lwd = 2)
+    abline(v = mean(surv_days), lty = 2, lwd = 2)
   })
 
   output$survival_hist <- renderPlot({
-    sd <- survival_days_data()
+    surv_days <- survival_days_data()
 
     hist(
-      sd,
+      surv_days,
       breaks = 30,
       col = "darkgreen",
       border = "white",
@@ -414,13 +781,13 @@ server <- function(input, output, session) {
   })
 
   output$survival_stats <- renderPrint({
-    sd <- survival_days_data()
+    surv_days <- survival_days_data()
 
-    cat("Observed post-transplant deaths:", length(sd), "\n")
-    cat("Average survival:", round(mean(sd), 2), "days\n")
-    cat("Median survival:", round(median(sd), 2), "days\n")
-    cat("Standard deviation:", round(sd(sd), 2), "days\n")
-    cat("Max survival:", round(max(sd), 2), "days\n")
+    cat("Observed post-transplant deaths:", length(surv_days), "\n")
+    cat("Average survival:", round(mean(surv_days), 2), "days\n")
+    cat("Median survival:", round(median(surv_days), 2), "days\n")
+    cat("Standard deviation:", round(stats::sd(surv_days), 2), "days\n")
+    cat("Max survival:", round(max(surv_days), 2), "days\n")
   })
 
   output$outcome_plot <- renderPlot({
@@ -476,6 +843,35 @@ server <- function(input, output, session) {
     req(rv$exp_result)
     experimentMetrics(rv$exp_result)
   }, striped = TRUE, bordered = TRUE, spacing = "s")
+
+  output$saved_experiments_table <- renderTable({
+    req(length(rv$experiments) > 0)
+
+    data.frame(
+      id = vapply(rv$experiments, function(x) x$id, character(1)),
+      label = vapply(rv$experiments, function(x) x$label, character(1)),
+      policy_type = vapply(rv$experiments, function(x) x$policy_type, character(1)),
+      n_runs = vapply(rv$experiments, function(x) x$n_runs, numeric(1)),
+      created_at = vapply(rv$experiments, function(x) as.character(x$created_at), character(1)),
+      stringsAsFactors = FALSE
+    )
+  }, striped = TRUE, bordered = TRUE, spacing = "s")
+
+  output$comparison_summary_table <- renderTable({
+    comparison_summary_table()
+  }, striped = TRUE, bordered = TRUE, spacing = "s")
+
+  output$comparison_boxplot <- renderPlot({
+    df <- comparison_plot_df()
+
+    boxplot(
+      value ~ experiment,
+      data = df,
+      main = paste("Comparison of", input$compare_metric),
+      ylab = input$compare_metric
+    )
+  })
+
 }
 
 shinyApp(ui, server)
