@@ -3,8 +3,17 @@
 ## File: R/s4_config.R
 ## =========================================================
 
-## library(methods)
 
+#' COMET run configuration
+#'
+#' @slot days Number of simulation days.
+#' @slot seed Random seed or NULL.
+#' @slot desired Candidate/donor generation mode.
+#' @slot can_start Starting candidate count or candidate data.frame.
+#' @slot include_matches Logical.
+#' @slot return_params Logical.
+#' @slot notes Optional notes.
+#' @exportClass COMETConfig
 setClass(
   "COMETConfig",
   slots = c(
@@ -30,7 +39,13 @@ setClass(
 )
 
 ## ---- generics ----
+#' Validate a COMET configuration
+#' @param config A COMETConfig object.
+#' @export
 setGeneric("validateConfig", function(config) standardGeneric("validateConfig"))
+#' Summarize a COMET configuration
+#' @param config A COMETConfig object.
+#' @export
 setGeneric("configSummary", function(config) standardGeneric("configSummary"))
 
 ## ---- validation ----
@@ -84,6 +99,17 @@ setMethod("configSummary", "COMETConfig", function(config) {
 })
 
 ## ---- constructor ----
+#' Create a COMET configuration
+#'
+#' @param days Number of simulation days.
+#' @param seed Optional random seed.
+#' @param desired Candidate/donor generation mode.
+#' @param can_start Starting candidate count or a data.frame of old candidates.
+#' @param include_matches Whether to keep all match records.
+#' @param return_params Whether to return generator parameters.
+#' @param notes Optional notes.
+#' @return A COMETConfig object.
+#' @export
 COMETConfig <- function(days,
                         seed = NULL,
                         desired = "random",

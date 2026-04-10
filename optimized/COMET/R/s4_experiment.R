@@ -6,6 +6,8 @@
 ## ---------------------------------------------------------
 ## Classes
 ## ---------------------------------------------------------
+#' COMET multi-run experiment class
+#' @exportClass COMETExperiment
 setClass(
   "COMETExperiment",
   slots = c(
@@ -23,7 +25,8 @@ setClass(
     notes = ""
   )
 )
-
+#' COMET experiment result class
+#' @exportClass COMETExperimentResult
 setClass(
   "COMETExperimentResult",
   slots = c(
@@ -46,11 +49,34 @@ setClass(
 ## ---------------------------------------------------------
 ## Generics
 ## ---------------------------------------------------------
+#' Validate a COMET experiment
+#' @param experiment A COMETExperiment object.
+#' @export
 setGeneric("validateExperiment", function(experiment) standardGeneric("validateExperiment"))
+
+#' Run a COMET experiment
+#' @param experiment A COMETExperiment object.
+#' @export
 setGeneric("runExperiment", function(experiment) standardGeneric("runExperiment"))
+
+#' Get the result list from a COMETExperimentResult
+#' @param x A COMETExperimentResult object.
+#' @export
 setGeneric("getResults", function(x) standardGeneric("getResults"))
+
+#' Get seeds from a COMETExperimentResult
+#' @param x A COMETExperimentResult object.
+#' @export
 setGeneric("getSeeds", function(x) standardGeneric("getSeeds"))
+
+#' Get the run table from a COMETExperimentResult
+#' @param x A COMETExperimentResult object.
+#' @export
 setGeneric("getResultTable", function(x) standardGeneric("getResultTable"))
+
+#' Get per-run metrics from a COMETExperimentResult
+#' @param x A COMETExperimentResult object.
+#' @export
 setGeneric("experimentMetrics", function(x) standardGeneric("experimentMetrics"))
 
 ## ---------------------------------------------------------
@@ -106,6 +132,16 @@ setMethod("validateExperiment", "COMETExperiment", function(experiment) {
 ## ---------------------------------------------------------
 ## Constructors
 ## ---------------------------------------------------------
+#' Create a COMET experiment
+#'
+#' @param simulator A COMETSimulator object.
+#' @param n_runs Number of runs.
+#' @param seeds Optional seed or seed vector.
+#' @param parallel Whether to run in parallel.
+#' @param workers Optional number of workers.
+#' @param notes Optional notes.
+#' @return A COMETExperiment object.
+#' @export
 COMETExperiment <- function(simulator,
                             n_runs,
                             seeds = NULL,
@@ -125,6 +161,16 @@ COMETExperiment <- function(simulator,
   exp
 }
 
+#' Create a COMET experiment result
+#'
+#' @param experiment A COMETExperiment object.
+#' @param results A list of COMETResult objects.
+#' @param seeds Numeric seeds used.
+#' @param timing Timing information.
+#' @param result_table Per-run result table.
+#' @param call Matched call.
+#' @return A COMETExperimentResult object.
+#' @export
 COMETExperimentResult <- function(experiment,
                                   results,
                                   seeds,

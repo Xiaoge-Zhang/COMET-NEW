@@ -1,25 +1,6 @@
 library(shiny)
-library(COMET)
+library(COMETopt)
 library(shinyjs)
-
-s4_config_path     <- normalizePath("../R/s4_config.R", winslash = "/", mustWork = TRUE)
-s4_policy_path     <- normalizePath("../R/s4_policy.R", winslash = "/", mustWork = TRUE)
-s4_result_path     <- normalizePath("../R/s4_result.R", winslash = "/", mustWork = TRUE)
-s4_simulator_path  <- normalizePath("../R/s4_simulator.R", winslash = "/", mustWork = TRUE)
-s4_experiment_path <- normalizePath("../R/s4_experiment.R", winslash = "/", mustWork = TRUE)
-
-source(s4_config_path)
-source(s4_policy_path)
-source(s4_result_path)
-source(s4_simulator_path)
-source(s4_experiment_path)
-
-options(
-  comet.s4_config_path = s4_config_path,
-  comet.s4_policy_path = s4_policy_path,
-  comet.s4_result_path = s4_result_path,
-  comet.s4_simulator_path = s4_simulator_path
-)
 
 ui <- navbarPage(
   "COMET Simulator",
@@ -48,6 +29,48 @@ ui <- navbarPage(
           numericInput("days", "Simulation days", value = 30, min = 1),
           numericInput("seed", "Seed", value = 123),
           numericInput("can_start", "Initial candidate count", value = 1250, min = 0),
+
+          radioButtons(
+            "candidate_mode",
+            "Candidate population",
+            choices = c(
+              "General population" = "general",
+              "Specific candidate type" = "specific"
+            ),
+            selected = "general"
+          ),
+
+          conditionalPanel(
+            condition = "input.candidate_mode == 'specific'",
+            selectInput(
+              "diag_group",
+              "Diagnosis group",
+              choices = c("A", "B", "C", "D"),
+              selected = "A"
+            ),
+            selectInput(
+              "blood_type",
+              "Blood type",
+              choices = c("A", "B", "AB", "O"),
+              selected = "A"
+            ),
+            selectInput(
+              "height_cat",
+              "Height category",
+              choices = c("<=62.25", "62.26-64.99", "65.00-66.99", "67.00-70.00", ">70"),
+              selected = "65.00-66.99"
+            ),
+            selectInput(
+              "wlauc_cat",
+              "Medical urgency (WLAUC) category",
+              choices = c("<250", "250-299", "300-324", "325-365"),
+              selected = "300-324"
+            ),
+            tags$p(
+              tags$a("WLAUC calculator", href = "#", target = "_blank")
+            )
+          ),
+
           selectInput("desired", "Desired strategy", choices = c("random", "mean"), selected = "random"),
           checkboxInput("include_matches", "Include matches", value = FALSE),
           checkboxInput("return_params", "Return parameters", value = FALSE),
@@ -105,11 +128,35 @@ ui <- navbarPage(
             )
           ),
 
+          tags$div(
+            style = "margin-bottom: 15px;",
+            selectInput(
+              "stratify_by",
+              "Stratify summary by",
+              choices = c(
+                "None" = "none",
+                "Diagnosis group" = "diag_group",
+                "Height category" = "height_cat",
+                "Blood type" = "blood_type",
+                "Candidate age" = "age_group",
+                "Sex" = "sex",
+                "Race/Ethnicity" = "race_ethnicity",
+                "WLAUC category" = "wlauc_cat",
+                "U.S. Region" = "region"
+              ),
+              selected = "none"
+            )
+          ),
+
           tabsetPanel(
             tabPanel(
               "Experiment Summary",
               verbatimTextOutput("experiment_summary_out"),
-              tableOutput("experiment_metrics_table")
+              verbatimTextOutput("population_settings_out"),
+              tableOutput("experiment_metrics_table"),
+              tags$hr(),
+              h4("Population Summary"),
+              tableOutput("population_summary_table")
             ),
             tabPanel(
               "Summary",
@@ -381,6 +428,7 @@ server <- function(input, output, session) {
   })
 
   make_experiment_record <- function(label, cfg, policy_type, policy_params, n_runs,
+                                     population_settings = NULL,
                                      result = NULL, exp_result = NULL) {
     id <- paste0("exp_", format(Sys.time(), "%Y%m%d_%H%M%S"))
 
@@ -392,6 +440,7 @@ server <- function(input, output, session) {
       policy_type = policy_type,
       policy_params = policy_params,
       n_runs = n_runs,
+      population_settings = population_settings,
       result = result,
       exp_result = exp_result
     )
@@ -422,6 +471,114 @@ server <- function(input, output, session) {
       NULL
     }
   }
+
+  get_recipient_data <- function(result_obj) {
+    d <- getData(result_obj)
+    rec <- d$recipient_database
+    req(!is.null(rec), nrow(rec) > 0)
+    rec
+  }
+
+  add_grouping_columns <- function(rec) {
+    out <- rec
+
+    if ("diag_group" %in% names(out)) {
+      out$diag_group <- as.character(out$diag_group)
+    }
+
+    if ("blood_type" %in% names(out)) {
+      out$blood_type <- as.character(out$blood_type)
+    }
+
+    if ("height" %in% names(out)) {
+      out$height_cat <- cut(
+        out$height,
+        breaks = c(-Inf, 62.25, 64.99, 66.99, 70.00, Inf),
+        labels = c("<=62.25", "62.26-64.99", "65.00-66.99", "67.00-70.00", ">70"),
+        right = TRUE
+      )
+    }
+
+    if ("age" %in% names(out)) {
+      out$age_group <- cut(
+        out$age,
+        breaks = c(18, 35, 50, 65, Inf),
+        labels = c("18-34", "35-49", "50-64", ">=65"),
+        right = FALSE
+      )
+    }
+
+    if ("sex" %in% names(out)) {
+      out$sex <- as.character(out$sex)
+    }
+
+    if ("race_ethnicity" %in% names(out)) {
+      out$race_ethnicity <- as.character(out$race_ethnicity)
+    }
+
+    if ("region" %in% names(out)) {
+      out$region <- as.character(out$region)
+    }
+
+    if ("wlauc" %in% names(out)) {
+      out$wlauc_cat <- cut(
+        out$wlauc,
+        breaks = c(-Inf, 250, 300, 325, 365),
+        labels = c("<250", "250-299", "300-324", "325-365"),
+        right = FALSE
+      )
+    }
+
+    out
+  }
+
+  summary_by_group <- reactive({
+    req(rv$result)
+
+    rec <- get_recipient_data(rv$result)
+    rec <- add_grouping_columns(rec)
+
+    group_var <- input$stratify_by
+    req(!is.null(group_var))
+
+    # helper columns
+    if (!"listing_day" %in% names(rec)) rec$listing_day <- NA_real_
+    if (!"transplant_day" %in% names(rec)) rec$transplant_day <- NA_real_
+    if (!"death_day" %in% names(rec)) rec$death_day <- NA_real_
+
+    rec$was_transplanted <- !is.na(rec$transplant_day)
+    rec$wait_time <- ifelse(rec$was_transplanted, rec$transplant_day - rec$listing_day, NA_real_)
+    rec$waitlist_death <- !is.na(rec$death_day) & is.na(rec$transplant_day)
+
+    make_summary <- function(df, label) {
+      wt <- df$wait_time[!is.na(df$wait_time) & is.finite(df$wait_time) & df$wait_time >= 0]
+
+      data.frame(
+        group = label,
+        starting_candidates = nrow(df),
+        transplants = sum(df$was_transplanted, na.rm = TRUE),
+        waitlist_deaths = sum(df$waitlist_death, na.rm = TRUE),
+        median_wait_time = if (length(wt) > 0) median(wt) else NA_real_,
+        iqr_wait_time = if (length(wt) > 0) IQR(wt) else NA_real_,
+        stringsAsFactors = FALSE
+      )
+    }
+
+    if (group_var == "none") {
+      return(make_summary(rec, "Total"))
+    }
+
+    req(group_var %in% names(rec))
+
+    split_list <- split(rec, rec[[group_var]], drop = TRUE)
+
+    do.call(
+      rbind,
+      lapply(names(split_list), function(g) {
+        make_summary(split_list[[g]], g)
+      })
+    )
+  })
 
   observeEvent(input$run_save_exp, {
     req(!rv$running)
@@ -522,6 +679,13 @@ server <- function(input, output, session) {
         policy_type = input$policy_type,
         policy_params = current_policy_params(),
         n_runs = input$n_runs,
+        population_settings = list(
+          candidate_mode = input$candidate_mode,
+          diag_group = if (!is.null(input$diag_group)) input$diag_group else NA_character_,
+          blood_type = if (!is.null(input$blood_type)) input$blood_type else NA_character_,
+          height_cat = if (!is.null(input$height_cat)) input$height_cat else NA_character_,
+          wlauc_cat = if (!is.null(input$wlauc_cat)) input$wlauc_cat else NA_character_
+        ),
         result = saved_result,
         exp_result = saved_exp_result
       )
@@ -835,8 +999,11 @@ server <- function(input, output, session) {
   })
 
   output$experiment_summary_out <- renderPrint({
-    req(rv$exp_result)
-    summary(rv$exp_result)
+    if (!is.null(rv$exp_result)) {
+      summary(rv$exp_result)
+    } else if (!is.null(rv$result)) {
+      summary(rv$result)
+    }
   })
 
   output$experiment_metrics_table <- renderTable({
@@ -852,10 +1019,68 @@ server <- function(input, output, session) {
       label = vapply(rv$experiments, function(x) x$label, character(1)),
       policy_type = vapply(rv$experiments, function(x) x$policy_type, character(1)),
       n_runs = vapply(rv$experiments, function(x) x$n_runs, numeric(1)),
+      candidate_mode = vapply(
+        rv$experiments,
+        function(x) {
+          if (is.null(x$population_settings)) return(NA_character_)
+          x$population_settings$candidate_mode
+        },
+        character(1)
+      ),
+      diagnosis_group = vapply(
+        rv$experiments,
+        function(x) {
+          if (is.null(x$population_settings)) return(NA_character_)
+          x$population_settings$diag_group
+        },
+        character(1)
+      ),
+      blood_type = vapply(
+        rv$experiments,
+        function(x) {
+          if (is.null(x$population_settings)) return(NA_character_)
+          x$population_settings$blood_type
+        },
+        character(1)
+      ),
+      height_cat = vapply(
+        rv$experiments,
+        function(x) {
+          if (is.null(x$population_settings)) return(NA_character_)
+          x$population_settings$height_cat
+        },
+        character(1)
+      ),
+      wlauc_cat = vapply(
+        rv$experiments,
+        function(x) {
+          if (is.null(x$population_settings)) return(NA_character_)
+          x$population_settings$wlauc_cat
+        },
+        character(1)
+      ),
       created_at = vapply(rv$experiments, function(x) as.character(x$created_at), character(1)),
       stringsAsFactors = FALSE
     )
   }, striped = TRUE, bordered = TRUE, spacing = "s")
+
+  output$population_summary_table <- renderTable({
+    summary_by_group()
+  }, striped = TRUE, bordered = TRUE, spacing = "s")
+
+  output$population_settings_out <- renderPrint({
+    req(rv$active_experiment_id)
+    req(rv$active_experiment_id %in% names(rv$experiments))
+
+    rec <- rv$experiments[[rv$active_experiment_id]]
+    ps <- rec$population_settings
+
+    if (is.null(ps)) {
+      cat("No population settings stored.\n")
+    } else {
+      print(ps)
+    }
+  })
 
   output$comparison_summary_table <- renderTable({
     comparison_summary_table()

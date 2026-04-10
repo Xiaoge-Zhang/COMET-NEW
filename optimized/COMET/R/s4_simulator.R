@@ -2,7 +2,8 @@
 ## S4 Simulator (COMETSimulator) + run()
 ## File: R/s4_simulator.R
 ## =========================================================
-
+#' COMET simulator class
+#' @exportClass COMETSimulator
 setClass(
   "COMETSimulator",
   slots = c(
@@ -24,7 +25,14 @@ setClass(
   )
 )
 
+#' Run a COMET simulator
+#' @param simulator A COMETSimulator object.
+#' @export
 setGeneric("run", function(simulator) standardGeneric("run"))
+
+#' Validate a COMET simulator
+#' @param simulator A COMETSimulator object.
+#' @export
 setGeneric("validateSimulator", function(simulator) standardGeneric("validateSimulator"))
 
 setMethod("show", "COMETSimulator", function(object) {
@@ -53,6 +61,17 @@ setMethod("validateSimulator", "COMETSimulator", function(simulator) {
 })
 
 ## ---- constructor ----
+#' Create a COMET simulator
+#'
+#' @param config A COMETConfig object.
+#' @param policy A COMETPolicy object.
+#' @param candidate_generator Candidate generation function.
+#' @param donor_generator Donor generation function.
+#' @param iteration_fn Iteration function.
+#' @param preflight_fn Optional preflight function.
+#' @param notes Optional notes.
+#' @return A COMETSimulator object.
+#' @export
 COMETSimulator <- function(config,
                            policy,
                            candidate_generator = gen_and_spawn_candidates,

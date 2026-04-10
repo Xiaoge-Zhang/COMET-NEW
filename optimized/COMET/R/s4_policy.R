@@ -5,6 +5,8 @@
 
 
 ## ---------- Base policy (virtual) ----------
+#' Base COMET policy class
+#' @exportClass COMETPolicy
 setClass(
   "COMETPolicy",
   contains = "VIRTUAL",
@@ -21,13 +23,30 @@ setClass(
 )
 
 ## ---------- Concrete policies ----------
+#' CAS policy class
+#' @exportClass CASPolicy
 setClass("CASPolicy", contains = "COMETPolicy")
+#' LAS policy class
+#' @exportClass LASPolicy
 setClass("LASPolicy", contains = "COMETPolicy")
+#' Custom policy class
+#' @exportClass CustomPolicy
 setClass("CustomPolicy", contains = "COMETPolicy")  # for user-defined knobs
 
 ## ---------- Generics ----------
+#' Get policy parameters
+#' @param policy A COMETPolicy object.
+#' @export
 setGeneric("policyParams", function(policy) standardGeneric("policyParams"))
+
+#' Get a policy label
+#' @param policy A COMETPolicy object.
+#' @export
 setGeneric("policyLabel", function(policy) standardGeneric("policyLabel"))
+
+#' Validate a policy object
+#' @param policy A COMETPolicy object.
+#' @export
 setGeneric("validatePolicy", function(policy) standardGeneric("validatePolicy"))
 
 ## ---------- Base methods ----------
@@ -99,20 +118,38 @@ setMethod("validatePolicy", "LASPolicy", function(policy) {
 
 ## ---------- Constructors (recommended) ----------
 ## These auto-fill missing keys with NA so you never get "xxx is missing" again.
+#' Create a CAS policy
+#' @param name Policy name.
+#' @param params A named list of policy parameters.
+#' @param notes Optional notes.
+#' @param autofill Whether to fill missing required keys with NA.
+#' @return A CASPolicy object.
+#' @export
 CASPolicy <- function(name = "CAS policy", params = list(), notes = "", autofill = TRUE) {
   if (autofill) params <- .ensure_keys(params, .cas_required_keys, fill = NA)
   pol <- new("CASPolicy", name = name, params = params, notes = notes)
   validatePolicy(pol)
   pol
 }
-
+#' Create a LAS policy
+#' @param name Policy name.
+#' @param params A named list of policy parameters.
+#' @param notes Optional notes.
+#' @param autofill Whether to fill missing required keys with NA.
+#' @return A LASPolicy object.
+#' @export
 LASPolicy <- function(name = "LAS policy", params = list(), notes = "", autofill = TRUE) {
   if (autofill) params <- .ensure_keys(params, .las_required_keys, fill = NA)
   pol <- new("LASPolicy", name = name, params = params, notes = notes)
   validatePolicy(pol)
   pol
 }
-
+#' Create a custom policy
+#' @param name Policy name.
+#' @param params A named list of policy parameters.
+#' @param notes Optional notes.
+#' @return A CustomPolicy object.
+#' @export
 CustomPolicy <- function(name = "Custom policy", params = list(), notes = "") {
   new("CustomPolicy", name = name, params = params, notes = notes)
 }
