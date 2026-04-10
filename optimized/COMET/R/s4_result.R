@@ -2,7 +2,8 @@
 ## S4 Result object (COMETResult)
 ## File: R/s4_result.R
 ## =========================================================
-
+#' COMET simulation result class
+#' @exportClass COMETResult
 setClass(
   "COMETResult",
   slots = c(
@@ -22,9 +23,24 @@ setClass(
 )
 
 ## ---- generics ----
+#' Get raw data from a COMET result
+#' @param result A COMETResult object.
+#' @export
 setGeneric("getData", function(result) standardGeneric("getData"))
+
+#' Get timing information from a COMET result
+#' @param result A COMETResult object.
+#' @export
 setGeneric("getTiming", function(result) standardGeneric("getTiming"))
+
+#' Get the decision log from a COMET result
+#' @param result A COMETResult object.
+#' @export
 setGeneric("getDecisionLog", function(result) standardGeneric("getDecisionLog"))
+
+#' Extract comparison metrics from a COMET result
+#' @param result A COMETResult object.
+#' @export
 setGeneric("metrics", function(result) standardGeneric("metrics"))
 
 ## ---- methods ----
@@ -108,6 +124,16 @@ setMethod("metrics", "COMETResult", function(result) {
 })
 
 ## ---- constructor ----
+#' Create a COMET result object
+#'
+#' @param policy A COMETPolicy object.
+#' @param config A COMETConfig object.
+#' @param data Raw result data.
+#' @param timing Timing information.
+#' @param decision_log Character vector of decision messages.
+#' @param call Matched call.
+#' @return A COMETResult object.
+#' @export
 COMETResult <- function(policy, config, data, timing = list(), decision_log = character(), call = quote(NULL)) {
   if (!is(policy, "COMETPolicy")) stop("policy must be a COMETPolicy.", call. = FALSE)
   if (!is(config, "COMETConfig")) stop("config must be a COMETConfig.", call. = FALSE)
