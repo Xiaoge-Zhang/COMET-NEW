@@ -255,8 +255,19 @@ server <- function(input, output, session) {
   outputOptions(output, "has_exp_result", suspendWhenHidden = FALSE)
 
   observe({
-    shinyjs::disable("parallel")
-    shinyjs::disable("workers")
+    if (isTRUE(input$n_runs > 1)) {
+      shinyjs::enable("parallel")
+
+      if (isTRUE(input$parallel)) {
+        shinyjs::enable("workers")
+      } else {
+        shinyjs::disable("workers")
+      }
+    } else {
+      updateCheckboxInput(session, "parallel", value = FALSE)
+      shinyjs::disable("parallel")
+      shinyjs::disable("workers")
+    }
   })
 
   output$policy_params_ui <- renderUI({
@@ -640,12 +651,25 @@ server <- function(input, output, session) {
 
           incProgress(0.3, detail = "Building experiment")
 
+          if (input$n_runs > 1 && isTRUE(input$parallel)) {
+            validate(
+              need(!is.null(input$workers) && input$workers >= 1, "Workers must be at least 1."),
+              need(input$workers <= input$n_runs, "Workers should not exceed the number of runs.")
+            )
+          }
+
+          workers_to_use <- NULL
+
+          if (input$n_runs > 1 && isTRUE(input$parallel)) {
+            workers_to_use <- min(as.integer(input$workers), as.integer(input$n_runs))
+          }
+
           exp <- COMETExperiment(
             simulator = sim,
             n_runs = input$n_runs,
             seeds = input$seed,
-            parallel = FALSE,
-            workers = NULL
+            parallel = isTRUE(input$parallel),
+            workers = workers_to_use
           )
 
           incProgress(0.6, detail = "Executing experiment")
