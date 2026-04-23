@@ -371,6 +371,8 @@ setMethod("runExperiment", "COMETExperiment", function(experiment) {
     workers <- experiment@workers
     if (is.null(workers)) {
       workers <- min(n_runs, future::availableCores())
+    } else {
+      workers <- min(as.integer(workers), n_runs, future::availableCores())
     }
 
     old_plan <- future::plan()
@@ -378,20 +380,9 @@ setMethod("runExperiment", "COMETExperiment", function(experiment) {
 
     future::plan(future::multisession, workers = workers)
 
-    config_path <- getOption("comet.s4_config_path")
-    policy_path <- getOption("comet.s4_policy_path")
-    result_path <- getOption("comet.s4_result_path")
-    simulator_path <- getOption("comet.s4_simulator_path")
-
     res_list <- future.apply::future_lapply(
       seeds,
-      function(s, simulator_template, config_path, policy_path, result_path, simulator_path) {
-
-        source(config_path, local = FALSE)
-        source(policy_path, local = FALSE)
-        source(result_path, local = FALSE)
-        source(simulator_path, local = FALSE)
-
+      function(s, simulator_template) {
         cfg0 <- simulator_template@config
 
         cfg_i <- COMETConfig(
@@ -418,10 +409,6 @@ setMethod("runExperiment", "COMETExperiment", function(experiment) {
         list(seed = s, result = res_i)
       },
       simulator_template = base_sim,
-      config_path = config_path,
-      policy_path = policy_path,
-      result_path = result_path,
-      simulator_path = simulator_path,
       future.seed = TRUE
     )
   }
