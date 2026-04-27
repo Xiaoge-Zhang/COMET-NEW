@@ -21,6 +21,7 @@ ui <- navbarPage(
           numericInput("n_runs", "Number of runs", value = 1, min = 1, step = 1),
           checkboxInput("parallel", "Run in parallel", value = FALSE),
           numericInput("workers", "Workers (used only if parallel)", value = 2, min = 1, step = 1),
+          textOutput("available_cores_text"),
           helpText("If Number of runs = 1, the app behaves like a single simulation."),
 
           tags$hr(),
@@ -268,6 +269,15 @@ server <- function(input, output, session) {
       shinyjs::disable("parallel")
       shinyjs::disable("workers")
     }
+  })
+
+  output$available_cores_text <- renderText({
+    cores <- if (requireNamespace("future", quietly = TRUE)) {
+      future::availableCores()
+    } else {
+      parallel::detectCores(logical = TRUE)
+    }
+    paste("Available cores on this machine:", cores)
   })
 
   output$policy_params_ui <- renderUI({
