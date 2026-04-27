@@ -26,6 +26,8 @@ already. It is needed for `run_simulation` and
 devtools::install_github("ClevelandClinicQHS/cometdata")
 ```
 
+
+
 ## Basic example
 
 This will simulate the 2015 Lung Allocation Score (LAS) policy for 400
@@ -131,6 +133,27 @@ r4 <- run_simulation(days = 400, can_start = 1000,
                      wl_weight = 1, post_tx_weight = 1, wl_cap = 365, post_tx_cap = 365, seed = 26638)
 #> 10% done 20% done 30% done 40% done 50% done 60% done 70% done 80% done 90% done 100% done Time difference of 2.409165 mins
 ```
+## Deploying the Shiny app to shinyapps.io
+
+The Shiny application is located in the `lungV3` directory. Before deployment, initialize and snapshot the project environment with `renv`, install the required GitHub packages, and then deploy the app with `rsconnect`.
+
+```r
+renv::init()
+renv::snapshot()
+
+remotes::install_github(
+  "Xiaoge-Zhang/COMET-NEW",
+  subdir = "optimized/COMET"
+)
+
+remotes::install_github("ClevelandClinicQHS/cometdata")
+
+rsconnect::deployApp(
+  appDir = "lungV3",
+  appName = "lungV3"
+)
+
+
 
 ## A more indepth demonstration to show what is going on behind the scenes
 
