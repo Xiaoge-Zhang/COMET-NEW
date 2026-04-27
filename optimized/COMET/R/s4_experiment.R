@@ -369,6 +369,7 @@ setMethod("runExperiment", "COMETExperiment", function(experiment) {
     }
 
     workers <- experiment@workers
+    cat("available cores: ", future::availableCores(), "\n", sep = "")
     if (is.null(workers)) {
       workers <- min(n_runs, future::availableCores())
     } else {
