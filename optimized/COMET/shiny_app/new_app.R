@@ -148,23 +148,36 @@ ui <- navbarPage(
   tabPanel(
     title = "Run Experiment", value = "run",
     fluidPage(
-      tags$style(HTML("\n        .weight-status {position: sticky; top: 15px;}\n        .status-good {border-left: 5px solid #2e7d32;}\n        .status-warn {border-left: 5px solid #c62828;}\n        .result-card {background:#fff;border:1px solid #ddd;border-radius:6px;padding:15px;margin-bottom:15px;}\n        .summary-card {background:#f7f9fb;border:1px solid #d9e1e8;border-radius:6px;padding:12px;}\n      ")),
+      tags$style(HTML("
+        .weight-status {position: sticky; top: 15px;}
+        .status-good {border-left: 5px solid #2e7d32;}
+        .status-warn {border-left: 5px solid #c62828;}
+        .result-card {background:#fff;border:1px solid #ddd;border-radius:6px;padding:15px;margin-bottom:15px;}
+        .summary-card {background:#f7f9fb;border:1px solid #d9e1e8;border-radius:6px;padding:9px 11px;margin-bottom:8px;}
+        .summary-card h4 {margin:2px 0 6px 0;font-size:18px;}
+        .summary-card .table {margin-bottom:0;font-size:13px;}
+        .summary-card .table > thead > tr > th,
+        .summary-card .table > tbody > tr > td {padding:4px 7px;line-height:1.15;}
+        .requirements-card {background:#fffdf4;border:1px solid #eadca6;border-radius:6px;padding:8px 11px;margin-top:8px;font-size:13px;}
+        .requirements-card ul {margin:3px 0 0 0;padding-left:18px;}
+        .requirements-card li {margin-bottom:2px;line-height:1.25;}
+        .weight-status .well {margin-bottom:8px;padding:10px 14px;}
+        .weight-status .well h4 {margin:0 0 5px 0;font-size:22px;}
+        .weight-status .well p {margin:2px 0;}
+      ")),
+      h3("Run a saved CAS experiment"),
       fluidRow(
         column(
           width = 8,
-          h3("Run a saved CAS experiment"),
-          tags$div(
-            class = "well",
-            tags$p("CAS is currently the only available score model."),
-            tags$p("Set each adjustable weight manually in increments of 0.05. Sliders never change other sliders automatically."),
-            tags$p("The weights must total exactly 1.00 and match a precomputed combination before the experiment can be saved."),
-            tags$p("ABO weight plus Height weight cannot exceed 0.30."),
-            tags$p("Fixed weights are included automatically but are not shown as sliders.")
-          ),
           textInput("experiment_label", "Experiment name", value = "Experiment 1"),
           h4("CAS weights"),
           uiOutput("weight_sliders"),
-          actionButton("see_result", "See Result", class = "btn-primary", style = "width:100%;font-size:16px;"),
+          actionButton(
+            "see_result",
+            "See Result",
+            class = "btn-primary",
+            style = "width:100%;font-size:16px;"
+          ),
           tags$br(), tags$br(),
           uiOutput("run_message")
         ),
@@ -173,7 +186,20 @@ ui <- navbarPage(
           tags$div(
             class = "weight-status",
             uiOutput("weight_status_box"),
-            tags$div(class = "summary-card", h4("Current weight settings"), tableOutput("current_weights_table"))
+            tags$div(
+              class = "summary-card",
+              h4("Current weight settings"),
+              tableOutput("current_weights_table")
+            ),
+            tags$div(
+              class = "requirements-card",
+              tags$strong("Requirements"),
+              tags$ul(
+                tags$li("All weights must sum to exactly 1.00."),
+                tags$li("ABO weight plus Height weight cannot exceed 0.30."),
+                tags$li("A weight combination can only run if it exists in the precomputed results.")
+              )
+            )
           )
         )
       )
@@ -303,33 +329,30 @@ server <- function(input, output, session) {
     good <- total_valid && abo_height_valid && !is.null(exact)
 
     warnings <- list()
-    if (!total_valid) {
-      warnings <- append(warnings, list(tags$li(
-        paste0("Weights must total 1.00 before saving. Current difference: ",
-               sprintf("%+.2f", total - 1))
-      )))
-    }
     if (!abo_height_valid) {
-      warnings <- append(warnings, list(tags$li(
-        paste0("ABO weight + Height weight must be no greater than 0.30. Current combined value: ",
-               sprintf("%.2f", abo_height_total))
+      warnings <- append(warnings, list(tags$div(
+        style = "margin-top:4px;color:#b71c1c;",
+        tags$strong("ABO + Height exceeds 0.30.")
       )))
     }
     if (total_valid && abo_height_valid && is.null(exact)) {
-      warnings <- append(warnings, list(tags$li(
-        "The weights satisfy both limits, but this combination is not available in the precomputed results."
+      warnings <- append(warnings, list(tags$div(
+        style = "margin-top:4px;color:#b71c1c;",
+        tags$strong("This combination is not available in the precomputed results.")
       )))
     }
 
     status_content <- if (good) {
-      tags$p("Ready to view and save this experiment.")
+      tags$div(style = "margin-top:4px;color:#2e7d32;", "Ready to view and save.")
+    } else if (length(warnings) > 0) {
+      tagList(warnings)
     } else {
-      tags$ul(style = "padding-left:20px;margin-bottom:0;", warnings)
+      tags$div(style = "margin-top:4px;color:#666;", "Adjust the total to 1.00.")
     }
 
     tags$div(
       class = paste("well", if (good) "status-good" else "status-warn"),
-      h3(sprintf("Total: %.2f", total)),
+      h4(sprintf("Total: %.2f", total)),
       tags$p(tags$strong("ABO + Height: "), sprintf("%.2f / 0.30", abo_height_total)),
       status_content
     )
