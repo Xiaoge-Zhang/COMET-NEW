@@ -24,7 +24,7 @@
 #' @importFrom rlang .data
 #'
 iteration <- function(date, candidate_database, donor_database, include_matches,
-                      updated_list, match_alg, ...) {
+                      updated_list, match_alg, modules = NULL, ...) {
 
   # initialize timing record
   tic_total <- Sys.time()
@@ -42,6 +42,17 @@ iteration <- function(date, candidate_database, donor_database, include_matches,
   post_tx_death_database <- updated_list$post_tx_death_database
   non_used_donors <- updated_list$non_used_donors
   all_matches <- updated_list$all_matches
+
+  ## create default
+  default_modules <- list(
+    pre_tx_update  = update_patients,
+    post_tx_update = update_patients,
+    match          = match_alg,
+    transplant     = transplant_candidates
+  )
+
+  if (is.null(modules)) modules <- list()
+  modules <- utils::modifyList(default_modules, modules)
 
   ## --- PRE-TRANSPLANT UPDATE ---
   current_candidates <- mutate(current_candidates, days_on_waitlist = date - .data$listing_day)
@@ -158,7 +169,8 @@ iteration <- function(date, candidate_database, donor_database, include_matches,
 
   # --- Case: donors found ---------------------------------------------------
   tic_match <- Sys.time()
-  matches   <- match_alg(alive, donors_avl, ...)
+  matches   <- modules$match(alive, donors_avl, ...)
+  validate_matches(matches)
   toc_match <- Sys.time()
 
   timings$match_phase <- as.numeric(difftime(toc_match, tic_match, units = "secs"))
@@ -187,7 +199,7 @@ iteration <- function(date, candidate_database, donor_database, include_matches,
 
   if (nrow(matches) > 0L) {
 
-    tr <- transplant_candidates(matches, recipient_database$c_id)
+    tr <- modules$transplant(matches, recipient_database$c_id)
 
     # --- Fast summarization of organs_rec by donor ID ---
     d_ids <- tr$d_id
