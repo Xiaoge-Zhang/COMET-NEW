@@ -281,7 +281,7 @@ experiment_display <- function(exp) {
 ui <- navbarPage(
   id = "main_nav",
   title = "COMET CAS Saved Results",
-
+  
   tabPanel(
     title = "Run Experiment", value = "run",
     fluidPage(
@@ -448,7 +448,7 @@ ui <- navbarPage(
       )
     )
   ),
-
+  
   tabPanel(
     title = "Result Detail", value = "results",
     fluidPage(
@@ -490,7 +490,7 @@ ui <- navbarPage(
       )
     )
   ),
-
+  
   tabPanel(
     title = "Saved Experiments", value = "saved",
     fluidPage(
@@ -524,7 +524,7 @@ ui <- navbarPage(
       )
     )
   ),
-
+  
   tabPanel(
     title = "Experiment Comparison", value = "comparison",
     fluidPage(
@@ -540,7 +540,7 @@ ui <- navbarPage(
           width = 8,
           tags$div(class = "result-card",
                    h4("Expected outcome by bracket"),
-                   tags$p(class = "text-muted", "Rows are population brackets; columns are selected experiments. Values are fitted skew-normal expected means."),
+                   tags$p(class = "text-muted", "Rows are population brackets; columns are selected experiments. Values are fitted skew-normal expected means. All results shown in this table are the mean of 500 simulations."),
                    tableOutput("comparison_table"))
         )
       )
@@ -629,7 +629,7 @@ server <- function(input, output, session) {
       })
     )
   })
-
+  
   current_slider_values <- function() {
     pd <- current_policy_data()
     vals <- setNames(numeric(length(pd$weight_cols)), pd$weight_cols)
@@ -738,7 +738,7 @@ server <- function(input, output, session) {
       status_content
     )
   })
-
+  
   output$current_weights_table <- renderTable({
     pd <- current_policy_data()
     values <- current_slider_values()
@@ -766,7 +766,7 @@ server <- function(input, output, session) {
     if (is.null(msg)) return(NULL)
     tags$div(class = "alert alert-success", msg)
   })
-
+  
   update_experiment_choices <- function(exps, selected = NULL) {
     choices <- setNames(names(exps), vapply(exps, experiment_display, character(1)))
     updateSelectInput(session, "saved_experiment", choices = choices, selected = selected)
@@ -777,7 +777,7 @@ server <- function(input, output, session) {
       selected = intersect(isolate(input$comparison_experiments), names(exps))
     )
   }
-
+  
   observeEvent(input$see_result, {
     st <- validation_status()
     if (!st$good) {
@@ -791,7 +791,7 @@ server <- function(input, output, session) {
       showNotification("Experiment names must be unique. Please try again.", type = "error", duration = 6)
       return()
     }
-
+    
     key <- paste0(format(Sys.time(), "%Y%m%d%H%M%OS3"), "_", sample.int(99999, 1))
     label <- clean_label(input$experiment_label)
     row <- st$exact
@@ -814,22 +814,22 @@ server <- function(input, output, session) {
     run_message_text(paste0("Saved ", exp$name, if (nzchar(exp$label)) paste0(" — ", exp$label) else "", "."))
     updateNavbarPage(session, "main_nav", selected = "results")
   })
-
+  
   current_experiment <- reactive({
     key <- current_experiment_key()
     exps <- saved_experiments()
     if (is.null(key) || is.null(exps[[key]])) return(NULL)
     exps[[key]]
   })
-
+  
   output$has_current_experiment <- reactive(!is.null(current_experiment()))
   outputOptions(output, "has_current_experiment", suspendWhenHidden = FALSE)
-
+  
   output$result_title <- renderText({
     exp <- current_experiment(); req(exp)
     paste0(experiment_display(exp), " — Saved Results")
   })
-
+  
   output$result_weight_summary <- renderUI({
     exp <- current_experiment(); req(exp)
     weight_text <- paste(
@@ -845,7 +845,7 @@ server <- function(input, output, session) {
       tags$strong("Weights: "), weight_text
     )
   })
-
+  
   experiment_skew <- reactive({
     exp <- current_experiment(); req(exp)
     pd <- policy_data_list[[exp$policy_key]]
@@ -853,7 +853,7 @@ server <- function(input, output, session) {
     validate(need(nrow(out) > 0, "No fitted distributions were found for this experiment."))
     out
   })
-
+  
   observeEvent(experiment_skew(), {
     dat <- experiment_skew()
     names_available <- unique(as.character(dat$name))
@@ -861,7 +861,7 @@ server <- function(input, output, session) {
     selected <- if ("ov" %in% names_available) "ov" else names_available[1]
     updateSelectInput(session, "result_name", choices = choices, selected = selected)
   }, ignoreInit = FALSE)
-
+  
   observeEvent(list(experiment_skew(), input$result_name), {
     req(input$result_name)
     dat <- experiment_skew()
@@ -870,13 +870,13 @@ server <- function(input, output, session) {
     selected <- if (!is.null(isolate(input$result_mod)) && isolate(input$result_mod) %in% mods) isolate(input$result_mod) else mods[1]
     updateSelectInput(session, "result_mod", choices = choices, selected = selected)
   }, ignoreInit = FALSE)
-
+  
   selected_result_data <- reactive({
     req(input$result_name, input$result_mod)
     d <- experiment_skew()
     d[d$name == input$result_name & d$mods_id == input$result_mod, , drop = FALSE]
   })
-
+  
   output$result_summary_table <- renderTable({
     d <- selected_result_data()
     validate(need(nrow(d) > 0, "No summary is available."))
@@ -897,16 +897,20 @@ server <- function(input, output, session) {
     })
     ymax <- max(unlist(curves), na.rm = TRUE)
     if (!is.finite(ymax) || ymax <= 0) ymax <- 1
-
+    
     plot(x, curves[[1]], type = "l", lwd = 2, col = cols[1], lty = ltys[1],
          ylim = c(0, ymax * 1.08), xlab = display_mod(input$result_mod), ylab = "Density",
-         main = paste(display_name(input$result_name), "—", display_mod(input$result_mod)))
+         main = paste(display_name(input$result_name), "—", display_mod(input$result_mod)),
+         axes = FALSE)
+    axis(1, at = axTicks(1), labels = fmt2(axTicks(1)))
+    axis(2, at = axTicks(2), labels = fmt2(axTicks(2)))
+    box()
     if (length(curves) > 1) for (j in 2:length(curves)) lines(x, curves[[j]], lwd = 2, col = cols[j], lty = ltys[j])
-    legend("topright", legend = group_values, col = cols, lty = ltys, lwd = 2,
+    legend("topright", legend = fmt2_if_numeric(group_values), col = cols, lty = ltys, lwd = 2,
            title = if (input$result_name == "ov") "Result" else "Bracket", bty = "n", cex = 0.9)
     grid()
   })
-
+  
   output$saved_experiments_table <- renderTable({
     exps <- saved_experiments()
     if (length(exps) == 0) return(data.frame(Message = "No experiments saved in this session."))
@@ -956,7 +960,7 @@ server <- function(input, output, session) {
     }, once = TRUE)
     updateNavbarPage(session, "main_nav", selected = "results")
   })
-
+  
   observe({
     exps <- saved_experiments()
     req(length(exps) > 0)
@@ -973,7 +977,7 @@ server <- function(input, output, session) {
     selected <- if (!is.null(input$comparison_name) && input$comparison_name %in% names_available) input$comparison_name else names_available[1]
     updateSelectInput(session, "comparison_name", choices = choices, selected = selected)
   })
-
+  
   observeEvent(list(input$comparison_experiments, input$comparison_name), {
     exps <- saved_experiments()
     req(length(input$comparison_experiments) > 0, input$comparison_name)
@@ -988,11 +992,11 @@ server <- function(input, output, session) {
     selected <- if (!is.null(input$comparison_mod) && input$comparison_mod %in% mods) input$comparison_mod else mods[1]
     updateSelectInput(session, "comparison_mod", choices = choices, selected = selected)
   }, ignoreInit = FALSE)
-
+  
   output$comparison_table <- renderTable({
     exps <- saved_experiments()
     req(length(input$comparison_experiments) > 0, input$comparison_name, input$comparison_mod)
-
+    
     selected_exps <- exps[input$comparison_experiments]
     value_list <- lapply(selected_exps, function(exp) {
       pd <- policy_data_list[[exp$policy_key]]
