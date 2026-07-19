@@ -164,7 +164,7 @@ format_sig <- function(x, digits = 2) {
   ifelse(
     is.na(x),
     "",
-    format(signif(as.numeric(x), digits = digits), scientific = FALSE, trim = TRUE)
+    formatC(as.numeric(x), format = "f", digits = digits)
   )
 }
 
@@ -477,6 +477,10 @@ ui <- navbarPage(
               div(
                 class = "compact-result-card",
                 h4("Distribution summary"),
+                tags$p(
+                  class = "text-muted",
+                  "Summary statistics are based on the outcomes of 500 simulation."
+                ),
                 tableOutput("result_summary_table")
               )
             )
@@ -484,7 +488,20 @@ ui <- navbarPage(
           div(
             class = "compact-result-card",
             plotOutput("result_distribution_plot", height = "360px"),
-            tags$div(class = "plot-footnote", "Note: this figure is drawn based on the fitted distribution of 500 different simulations.")
+            tags$div(
+              class = "plot-footnote",
+              "Note: this figure is based on skew-normal distributions fitted to the outcomes of 500 simulation replicates."
+            )
+          ),
+          
+          div(
+            class = "compact-result-card",
+            h4("Violin plot"),
+            plotOutput("result_violin_plot", height = "360px"),
+            tags$div(
+              class = "plot-footnote",
+              "Note: violin shapes represent skew-normal distributions fitted to the outcomes of 500 simulation replicates."
+            )
           )
         )
       )
@@ -904,6 +921,91 @@ server <- function(input, output, session) {
     if (length(curves) > 1) for (j in 2:length(curves)) lines(x, curves[[j]], lwd = 2, col = cols[j], lty = ltys[j])
     legend("topright", legend = group_values, col = cols, lty = ltys, lwd = 2,
            title = if (input$result_name == "ov") "Result" else "Bracket", bty = "n", cex = 0.9)
+    grid()
+  })
+  output$result_violin_plot <- renderPlot({
+    d <- selected_result_data()
+    validate(need(nrow(d) > 0, "No distributions are available."))
+    
+    group_values <- unique(as.character(d$value))
+    n_groups <- length(group_values)
+    
+    # Determine common outcome range
+    yr <- safe_range(d)
+    y <- seq(yr[1], yr[2], length.out = 500)
+    
+    # Generate fitted densities for each bracket
+    densities <- lapply(group_values, function(g) {
+      one <- d[d$value == g, , drop = FALSE]
+      
+      dens <- skew_pdf(
+        y,
+        one$xi[1],
+        one$omega[1],
+        one$alpha[1]
+      )
+      
+      dens[!is.finite(dens)] <- 0
+      dens
+    })
+    
+    # Set up empty plot
+    plot(
+      NA,
+      xlim = c(0.5, n_groups + 0.5),
+      ylim = yr,
+      xaxt = "n",
+      xlab = if (input$result_name == "ov") "Result" else "Bracket",
+      ylab = display_mod(input$result_mod),
+      main = paste(
+        display_name(input$result_name),
+        "—",
+        display_mod(input$result_mod),
+        "Violin Plot"
+      )
+    )
+    
+    axis(
+      1,
+      at = seq_along(group_values),
+      labels = group_values
+    )
+    
+    # Draw one violin for each bracket
+    for (i in seq_along(group_values)) {
+      
+      dens <- densities[[i]]
+      
+      # Scale width of each violin
+      if (max(dens, na.rm = TRUE) > 0) {
+        width <- dens / max(dens, na.rm = TRUE) * 0.4
+      } else {
+        width <- rep(0, length(dens))
+      }
+      
+      polygon(
+        c(i - width, rev(i + width)),
+        c(y, rev(y)),
+        border = "black"
+      )
+      
+      # Fitted distribution mean
+      one <- d[d$value == group_values[i], , drop = FALSE]
+      
+      fitted_mean <- skew_mean(
+        one$xi[1],
+        one$omega[1],
+        one$alpha[1]
+      )
+      
+      points(
+        i,
+        fitted_mean,
+        pch = 19,
+        cex = 1.2
+      )
+    }
+    
     grid()
   })
 
