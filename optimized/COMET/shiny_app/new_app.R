@@ -59,10 +59,10 @@ required_skew <- c("xi", "omega", "alpha", "mods_id", "name", "value", "params_1
 load_policy_data <- function(spec) {
   params_file <- find_data_file(spec$params_candidates)
   skew_file <- find_data_file(spec$skew_candidates)
-
+  
   params <- read.csv(params_file, stringsAsFactors = FALSE, check.names = FALSE)
   skew <- read.csv(skew_file, stringsAsFactors = FALSE, check.names = FALSE)
-
+  
   weight_cols <- intersect(weight_order, names(params))
   if (length(weight_cols) == 0) {
     stop(params_file, " does not contain any recognized weight columns.")
@@ -71,20 +71,20 @@ load_policy_data <- function(spec) {
     stop(skew_file, " is missing required columns: ",
          paste(setdiff(required_skew, names(skew)), collapse = ", "))
   }
-
+  
   if (!("params_1" %in% names(params))) {
     params$params_1 <- seq_len(nrow(params))
   }
-
+  
   for (w in weight_cols) params[[w]] <- as.numeric(params[[w]])
   params$params_1 <- as.character(params$params_1)
   skew$params_1 <- as.character(skew$params_1)
   skew$xi <- as.numeric(skew$xi)
   skew$omega <- as.numeric(skew$omega)
   skew$alpha <- as.numeric(skew$alpha)
-
+  
   params <- params[!duplicated(params$params_1), , drop = FALSE]
-
+  
   default_idx <- integer(0)
   if ("default" %in% names(params)) {
     default_idx <- which(tolower(as.character(params$default)) %in% c("true", "t", "1", "yes", "y"))
@@ -94,7 +94,7 @@ load_policy_data <- function(spec) {
   } else {
     params[1, , drop = FALSE]
   }
-
+  
   # Custom mode starts from the first non-default row.
   # In custom mode, each slider should only expose values that occur in
   # non-default rows. The default row is still available through the
@@ -108,8 +108,16 @@ load_policy_data <- function(spec) {
     custom_params <- params[as.character(params$params_1) != default_param_id, , drop = FALSE]
   }
   if (nrow(custom_params) == 0) custom_params <- default_row
-  custom_row <- custom_params[1, , drop = FALSE]
-
+  custom_start_values <- setNames(
+    round(as.numeric(default_row[1, weight_cols]), 12),
+    weight_cols
+  )
+  
+  if (identical(spec$label, "Amended-CAS")) {
+    custom_start_values <- round(custom_start_values / 0.05) * 0.05
+    custom_start_values <- round(custom_start_values, 12)
+  }
+  
   # Slider stops are the actual unique values in the non-default rows only.
   # The resulting selected combination still must exist in the full params
   # table before it can run.
@@ -118,22 +126,21 @@ load_policy_data <- function(spec) {
     vals[is.finite(vals)]
   })
   names(weight_values) <- weight_cols
-
+  
   weight_min <- sapply(weight_values, min, na.rm = TRUE)
   weight_max <- sapply(weight_values, max, na.rm = TRUE)
   adjustable_weights <- weight_cols[vapply(weight_values, length, integer(1)) > 1]
   fixed_weights <- setdiff(weight_cols, adjustable_weights)
-
+  
   default_slider_index <- setNames(integer(length(weight_cols)), weight_cols)
   custom_slider_index <- setNames(integer(length(weight_cols)), weight_cols)
   for (w in weight_cols) {
     vals <- weight_values[[w]]
     default_value <- round(as.numeric(default_row[[w]]), 12)
-    custom_value <- round(as.numeric(custom_row[[w]]), 12)
     default_slider_index[[w]] <- which.min(abs(vals - default_value))
-    custom_slider_index[[w]] <- which.min(abs(vals - custom_value))
+    custom_slider_index[[w]] <- 1L
   }
-
+  
   list(
     label = spec$label,
     params = params,
@@ -146,7 +153,7 @@ load_policy_data <- function(spec) {
     adjustable_weights = adjustable_weights,
     fixed_weights = fixed_weights,
     default_row = default_row,
-    custom_row = custom_row,
+    custom_start_values = custom_start_values,
     default_slider_index = default_slider_index,
     custom_slider_index = custom_slider_index
   )
@@ -190,7 +197,7 @@ slider_index_to_value <- function(pd, w, index) {
   vals <- pd$weight_values[[w]]
   if (length(vals) == 0) return(NA_real_)
   idx <- suppressWarnings(as.integer(round(as.numeric(index))))
-  if (!is.finite(idx)) idx <- value_to_slider_index(pd, w, pd$custom_row[[w]])
+  if (!is.finite(idx)) idx <- value_to_slider_index(pd, w, pd$custom_start_values[[w]])
   idx <- max(1, min(length(vals), idx))
   vals[[idx]]
 }
@@ -257,6 +264,30 @@ display_mod <- function(x) {
   ifelse(x %in% names(mapping), unname(mapping[x]), gsub("_", " ", x))
 }
 
+display_category <- function(name, value) {
+  value <- as.character(value)
+  
+  if (identical(name, "male")) {
+    key <- tolower(trimws(value))
+    mapping <- c(
+      "0" = "Female",
+      "0.0" = "Female",
+      "false" = "Female",
+      "f" = "Female",
+      "female" = "Female",
+      "1" = "Male",
+      "1.0" = "Male",
+      "true" = "Male",
+      "t" = "Male",
+      "male" = "Male"
+    )
+    matched <- key %in% names(mapping)
+    value[matched] <- unname(mapping[key[matched]])
+  }
+  
+  value
+}
+
 format_result_table <- function(d) {
   if (nrow(d) == 0) return(d)
   data.frame(
@@ -280,8 +311,8 @@ experiment_display <- function(exp) {
 # -------------------------------------------------------------------------
 ui <- navbarPage(
   id = "main_nav",
-  title = "COMET CAS Saved Results",
-
+  title = NULL,
+  
   tabPanel(
     title = "Run Experiment", value = "run",
     fluidPage(
@@ -428,27 +459,26 @@ ui <- navbarPage(
           width = 4,
           tags$div(
             class = "weight-status",
-            uiOutput("weight_status_box"),
-            tags$div(
-              class = "summary-card",
-              h4("Current weight settings"),
-              tableOutput("current_weights_table")
-            ),
             tags$div(
               class = "requirements-card",
               tags$strong("Requirements"),
               tags$ul(
                 tags$li("All weights must sum to exactly 1.00."),
-                tags$li("ABO weight plus Height weight cannot exceed 0.30 when those weights are available."),
-                tags$li("A weight combination can only run if it exists in the precomputed results.")
+                tags$li("Total Biological priority weight (ABO weight plus Height weight) cannot exceed 0.30.")
               )
+            ),
+            uiOutput("weight_status_box"),
+            tags$div(
+              class = "summary-card",
+              h4("Current weight settings"),
+              tableOutput("current_weights_table")
             )
           )
         )
       )
     )
   ),
-
+  
   tabPanel(
     title = "Result Detail", value = "results",
     fluidPage(
@@ -507,7 +537,7 @@ ui <- navbarPage(
       )
     )
   ),
-
+  
   tabPanel(
     title = "Saved Experiments", value = "saved",
     fluidPage(
@@ -541,7 +571,7 @@ ui <- navbarPage(
       )
     )
   ),
-
+  
   tabPanel(
     title = "Experiment Comparison", value = "comparison",
     fluidPage(
@@ -550,14 +580,16 @@ ui <- navbarPage(
         column(
           width = 4,
           selectInput("comparison_experiments", "Experiments", choices = character(0), multiple = TRUE),
-          selectInput("comparison_name", "Stratified by", choices = NULL),
-          selectInput("comparison_mod", "Outcome", choices = NULL)
+          tags$p(
+            class = "text-muted",
+            "Select multiple experiments. Remove individual experiments by backspacing."
+          ),
+          selectInput("comparison_name", "Stratified by", choices = NULL)
         ),
         column(
           width = 8,
           tags$div(class = "result-card",
-                   h4("Expected outcome by bracket"),
-                   tags$p(class = "text-muted", "Rows are population brackets; columns are selected experiments. Values are fitted skew-normal expected means."),
+                   h4(textOutput("comparison_title", inline = TRUE)),
                    tableOutput("comparison_table"))
         )
       )
@@ -572,36 +604,30 @@ server <- function(input, output, session) {
   saved_experiments <- reactiveVal(list())
   current_experiment_key <- reactiveVal(NULL)
   run_message_text <- reactiveVal(NULL)
-  weight_mode <- reactiveVal("custom")
-
+  weight_mode <- reactiveVal("default")
+  
   current_policy_key <- reactive({
     key <- input$policy_select
     if (is.null(key) || !(key %in% names(policy_data_list))) names(policy_data_list)[1] else key
   })
-
+  
   current_policy_data <- reactive({
     policy_data_list[[current_policy_key()]]
   })
-
+  
   next_experiment_name <- reactive({
-    paste0("experiment", length(saved_experiments()) + 1)
+    paste0("Experiment ", length(saved_experiments()) + 1)
   })
-
+  
   output$next_experiment_name <- renderText({
     next_experiment_name()
   })
-
+  
   observeEvent(input$policy_select, {
-    pd <- current_policy_data()
-    weight_mode("custom")
+    weight_mode("default")
     run_message_text(NULL)
-    session$onFlushed(function() {
-      for (w in pd$weight_cols) {
-        updateSliderInput(session, paste0("weight_", w), value = pd$custom_slider_index[[w]])
-      }
-    }, once = TRUE)
   }, ignoreInit = TRUE)
-
+  
   output$weight_sliders <- renderUI({
     pd <- current_policy_data()
     mode <- weight_mode()
@@ -628,7 +654,7 @@ server <- function(input, output, session) {
           label <- weight_labels[[w]]
           if (is_fixed) label <- paste0(label, " (fixed)")
         }
-
+        
         tags$div(
           class = paste("slider-box", if (disabled) "slider-disabled" else ""),
           `data-values` = paste(format_weight_value(vals), collapse = "|"),
@@ -646,64 +672,65 @@ server <- function(input, output, session) {
       })
     )
   })
-
+  
   current_slider_values <- function() {
     pd <- current_policy_data()
     vals <- setNames(numeric(length(pd$weight_cols)), pd$weight_cols)
-
+    
     if (identical(weight_mode(), "default")) {
       for (w in pd$weight_cols) vals[[w]] <- round(as.numeric(pd$default_row[[w]]), 12)
       return(vals)
     }
-
+    
     for (w in pd$weight_cols) {
       v <- input[[paste0("weight_", w)]]
       if (is.null(v) || !is.finite(v)) {
-        vals[[w]] <- round(as.numeric(pd$custom_row[[w]]), 12)
+        vals[[w]] <- round(as.numeric(pd$custom_start_values[[w]]), 12)
       } else {
         vals[[w]] <- slider_index_to_value(pd, w, v)
       }
     }
     vals
   }
-
+  
   apply_values_to_sliders <- function(pd, values) {
     for (w in pd$weight_cols) {
       updateSliderInput(session, paste0("weight_", w), value = value_to_slider_index(pd, w, values[[w]]))
     }
   }
-
+  
   observeEvent(input$use_default_weight, {
     # Switching mode re-renders disabled one-point sliders that show the
     # true default-row values. No separate slider update is needed here.
     weight_mode("default")
     run_message_text(NULL)
   })
-
+  
   observeEvent(input$use_custom_weight, {
     pd <- current_policy_data()
     weight_mode("custom")
-    vals <- setNames(as.numeric(pd$custom_row[1, pd$weight_cols]), pd$weight_cols)
+    
     session$onFlushed(function() {
-      apply_values_to_sliders(pd, vals)
+      apply_values_to_sliders(pd, pd$custom_start_values)
     }, once = TRUE)
+    
     run_message_text(NULL)
   })
-
+  
   validation_status <- reactive({
     pd <- current_policy_data()
     values <- current_slider_values()
     total <- sum(values, na.rm = TRUE)
     total_valid <- abs(total - 1) <= 1e-6
-
+    
     has_abo_height <- all(c("abo_weight", "height_weight") %in% names(values))
     abo_height_total <- if (has_abo_height) values[["abo_weight"]] + values[["height_weight"]] else NA_real_
     abo_height_valid <- !has_abo_height || abo_height_total <= 0.30 + 1e-6
-
+    
     exact <- if (total_valid && abo_height_valid) find_exact_parameter_row(pd, values) else NULL
     available_valid <- !is.null(exact)
     good <- total_valid && abo_height_valid && available_valid
-
+    
     list(
       values = values,
       total = total,
@@ -716,10 +743,10 @@ server <- function(input, output, session) {
       good = good
     )
   })
-
+  
   output$weight_status_box <- renderUI({
     st <- validation_status()
-
+    
     warnings <- list()
     if (!st$abo_height_valid) {
       warnings <- append(warnings, list(tags$div(
@@ -733,7 +760,7 @@ server <- function(input, output, session) {
         tags$strong("This combination is not available in the precomputed results.")
       )))
     }
-
+    
     status_content <- if (st$good) {
       tags$div(style = "margin-top:4px;color:#2e7d32;", "Ready to view and save.")
     } else if (length(warnings) > 0) {
@@ -741,13 +768,13 @@ server <- function(input, output, session) {
     } else {
       tags$div(style = "margin-top:4px;color:#666;", "Adjust the total to 1.00.")
     }
-
+    
     abo_height_line <- if (st$has_abo_height) {
       tags$p(tags$strong("ABO + Height: "), sprintf("%.2f / 0.30", st$abo_height_total))
     } else {
       tags$p(tags$strong("ABO + Height: "), "not applicable for this policy")
     }
-
+    
     tags$div(
       class = paste("well", if (st$good) "status-good" else "status-warn"),
       h4(sprintf("Total: %.2f", if (abs(st$total - 1) <= 1e-6) 1 else st$total)),
@@ -755,7 +782,7 @@ server <- function(input, output, session) {
       status_content
     )
   })
-
+  
   output$current_weights_table <- renderTable({
     pd <- current_policy_data()
     values <- current_slider_values()
@@ -765,7 +792,7 @@ server <- function(input, output, session) {
       check.names = FALSE
     )
   }, striped = TRUE, bordered = TRUE, spacing = "s")
-
+  
   output$see_result_button <- renderUI({
     st <- validation_status()
     tags$button(
@@ -777,13 +804,13 @@ server <- function(input, output, session) {
       "See Result"
     )
   })
-
+  
   output$run_message <- renderUI({
     msg <- run_message_text()
     if (is.null(msg)) return(NULL)
     tags$div(class = "alert alert-success", msg)
   })
-
+  
   update_experiment_choices <- function(exps, selected = NULL) {
     choices <- setNames(names(exps), vapply(exps, experiment_display, character(1)))
     updateSelectInput(session, "saved_experiment", choices = choices, selected = selected)
@@ -794,21 +821,21 @@ server <- function(input, output, session) {
       selected = intersect(isolate(input$comparison_experiments), names(exps))
     )
   }
-
+  
   observeEvent(input$see_result, {
     st <- validation_status()
     if (!st$good) {
       showNotification("This experiment cannot be saved until all rules are satisfied and the combination is available.", type = "error", duration = 6)
       return()
     }
-
+    
     exps <- saved_experiments()
     exp_name <- next_experiment_name()
     if (exp_name %in% vapply(exps, function(x) x$name, character(1))) {
       showNotification("Experiment names must be unique. Please try again.", type = "error", duration = 6)
       return()
     }
-
+    
     key <- paste0(format(Sys.time(), "%Y%m%d%H%M%OS3"), "_", sample.int(99999, 1))
     label <- clean_label(input$experiment_label)
     row <- st$exact
@@ -822,7 +849,7 @@ server <- function(input, output, session) {
       created = format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
       weights = st$values
     )
-
+    
     exps[[key]] <- exp
     saved_experiments(exps)
     current_experiment_key(key)
@@ -831,22 +858,22 @@ server <- function(input, output, session) {
     run_message_text(paste0("Saved ", exp$name, if (nzchar(exp$label)) paste0(" — ", exp$label) else "", "."))
     updateNavbarPage(session, "main_nav", selected = "results")
   })
-
+  
   current_experiment <- reactive({
     key <- current_experiment_key()
     exps <- saved_experiments()
     if (is.null(key) || is.null(exps[[key]])) return(NULL)
     exps[[key]]
   })
-
+  
   output$has_current_experiment <- reactive(!is.null(current_experiment()))
   outputOptions(output, "has_current_experiment", suspendWhenHidden = FALSE)
-
+  
   output$result_title <- renderText({
     exp <- current_experiment(); req(exp)
     paste0(experiment_display(exp), " — Saved Results")
   })
-
+  
   output$result_weight_summary <- renderUI({
     exp <- current_experiment(); req(exp)
     weight_text <- paste(
@@ -862,7 +889,7 @@ server <- function(input, output, session) {
       tags$strong("Weights: "), weight_text
     )
   })
-
+  
   experiment_skew <- reactive({
     exp <- current_experiment(); req(exp)
     pd <- policy_data_list[[exp$policy_key]]
@@ -870,7 +897,7 @@ server <- function(input, output, session) {
     validate(need(nrow(out) > 0, "No fitted distributions were found for this experiment."))
     out
   })
-
+  
   observeEvent(experiment_skew(), {
     dat <- experiment_skew()
     names_available <- unique(as.character(dat$name))
@@ -878,7 +905,7 @@ server <- function(input, output, session) {
     selected <- if ("ov" %in% names_available) "ov" else names_available[1]
     updateSelectInput(session, "result_name", choices = choices, selected = selected)
   }, ignoreInit = FALSE)
-
+  
   observeEvent(list(experiment_skew(), input$result_name), {
     req(input$result_name)
     dat <- experiment_skew()
@@ -887,19 +914,19 @@ server <- function(input, output, session) {
     selected <- if (!is.null(isolate(input$result_mod)) && isolate(input$result_mod) %in% mods) isolate(input$result_mod) else mods[1]
     updateSelectInput(session, "result_mod", choices = choices, selected = selected)
   }, ignoreInit = FALSE)
-
+  
   selected_result_data <- reactive({
     req(input$result_name, input$result_mod)
     d <- experiment_skew()
     d[d$name == input$result_name & d$mods_id == input$result_mod, , drop = FALSE]
   })
-
+  
   output$result_summary_table <- renderTable({
     d <- selected_result_data()
     validate(need(nrow(d) > 0, "No summary is available."))
     format_result_table(d)
   }, striped = TRUE, bordered = TRUE, spacing = "s")
-
+  
   output$result_distribution_plot <- renderPlot({
     d <- selected_result_data()
     validate(need(nrow(d) > 0, "No distributions are available."))
@@ -914,7 +941,7 @@ server <- function(input, output, session) {
     })
     ymax <- max(unlist(curves), na.rm = TRUE)
     if (!is.finite(ymax) || ymax <= 0) ymax <- 1
-
+    
     plot(x, curves[[1]], type = "l", lwd = 2, col = cols[1], lty = ltys[1],
          ylim = c(0, ymax * 1.08), xlab = display_mod(input$result_mod), ylab = "Density",
          main = paste(display_name(input$result_name), "—", display_mod(input$result_mod)))
@@ -1008,7 +1035,7 @@ server <- function(input, output, session) {
     
     grid()
   })
-
+  
   output$saved_experiments_table <- renderTable({
     exps <- saved_experiments()
     if (length(exps) == 0) return(data.frame(Message = "No experiments saved in this session."))
@@ -1027,14 +1054,14 @@ server <- function(input, output, session) {
       )
     }))
   }, striped = TRUE, bordered = TRUE, spacing = "s")
-
+  
   observeEvent(input$saved_experiment, {
     exps <- saved_experiments()
     if (!is.null(input$saved_experiment) && input$saved_experiment %in% names(exps)) {
       updateTextInput(session, "saved_label_edit", value = exps[[input$saved_experiment]]$label)
     }
   }, ignoreInit = FALSE)
-
+  
   observeEvent(input$save_label_edit, {
     req(input$saved_experiment)
     exps <- saved_experiments()
@@ -1044,7 +1071,7 @@ server <- function(input, output, session) {
     update_experiment_choices(exps, selected = input$saved_experiment)
     showNotification("Label updated.", type = "message", duration = 3)
   })
-
+  
   observeEvent(input$load_saved_exp, {
     req(input$saved_experiment)
     exps <- saved_experiments(); req(exps[[input$saved_experiment]])
@@ -1058,13 +1085,13 @@ server <- function(input, output, session) {
     }, once = TRUE)
     updateNavbarPage(session, "main_nav", selected = "results")
   })
-
+  
   observe({
     exps <- saved_experiments()
     req(length(exps) > 0)
     selected_keys <- input$comparison_experiments
     if (is.null(selected_keys) || length(selected_keys) == 0) return()
-
+    
     dat_list <- lapply(exps[selected_keys], function(exp) {
       pd <- policy_data_list[[exp$policy_key]]
       pd$skew[pd$skew$params_1 == exp$params_1, , drop = FALSE]
@@ -1075,51 +1102,68 @@ server <- function(input, output, session) {
     selected <- if (!is.null(input$comparison_name) && input$comparison_name %in% names_available) input$comparison_name else names_available[1]
     updateSelectInput(session, "comparison_name", choices = choices, selected = selected)
   })
-
-  observeEvent(list(input$comparison_experiments, input$comparison_name), {
-    exps <- saved_experiments()
-    req(length(input$comparison_experiments) > 0, input$comparison_name)
-
-    dat_list <- lapply(exps[input$comparison_experiments], function(exp) {
-      pd <- policy_data_list[[exp$policy_key]]
-      pd$skew[pd$skew$params_1 == exp$params_1 & pd$skew$name == input$comparison_name, , drop = FALSE]
-    })
-    dat <- do.call(rbind, dat_list)
-    mods <- unique(as.character(dat$mods_id))
-    choices <- setNames(mods, vapply(mods, display_mod, character(1)))
-    selected <- if (!is.null(input$comparison_mod) && input$comparison_mod %in% mods) input$comparison_mod else mods[1]
-    updateSelectInput(session, "comparison_mod", choices = choices, selected = selected)
-  }, ignoreInit = FALSE)
-
+  
+  output$comparison_title <- renderText({
+    req(input$comparison_name)
+    if (identical(input$comparison_name, "ov")) {
+      "Median expected outcomes"
+    } else {
+      paste("Median expected outcomes by", display_name(input$comparison_name))
+    }
+  })
+  
   output$comparison_table <- renderTable({
     exps <- saved_experiments()
-    req(length(input$comparison_experiments) > 0, input$comparison_name, input$comparison_mod)
-
+    req(length(input$comparison_experiments) > 0, input$comparison_name)
+    
     selected_exps <- exps[input$comparison_experiments]
-    value_list <- lapply(selected_exps, function(exp) {
+    experiment_data <- lapply(selected_exps, function(exp) {
       pd <- policy_data_list[[exp$policy_key]]
-      as.character(pd$skew$value[
+      pd$skew[
         pd$skew$params_1 == exp$params_1 &
-          pd$skew$name == input$comparison_name &
-          pd$skew$mods_id == input$comparison_mod
-      ])
+          pd$skew$name == input$comparison_name,
+        ,
+        drop = FALSE
+      ]
     })
-    all_values <- unique(unlist(value_list))
-    validate(need(length(all_values) > 0, "No comparison data are available."))
-
-    out <- data.frame(Bracket = all_values, stringsAsFactors = FALSE, check.names = FALSE)
+    
+    pair_list <- lapply(experiment_data, function(d) {
+      data.frame(
+        mods_id = as.character(d$mods_id),
+        value = as.character(d$value),
+        stringsAsFactors = FALSE
+      )
+    })
+    pair_list <- pair_list[vapply(pair_list, nrow, integer(1)) > 0]
+    validate(need(length(pair_list) > 0, "No comparison data are available."))
+    
+    all_pairs <- unique(do.call(rbind, pair_list))
+    validate(need(nrow(all_pairs) > 0, "No comparison data are available."))
+    
+    out <- data.frame(
+      Outcome = vapply(all_pairs$mods_id, display_mod, character(1)),
+      Category = display_category(input$comparison_name, all_pairs$value),
+      stringsAsFactors = FALSE,
+      check.names = FALSE
+    )
+    
+    row_keys <- paste(all_pairs$mods_id, all_pairs$value, sep = "\r")
     used_names <- character(0)
-    for (exp in selected_exps) {
-      pd <- policy_data_list[[exp$policy_key]]
-      d <- pd$skew[pd$skew$params_1 == exp$params_1 & pd$skew$name == input$comparison_name &
-                     pd$skew$mods_id == input$comparison_mod, , drop = FALSE]
+    
+    for (i in seq_along(selected_exps)) {
+      exp <- selected_exps[[i]]
+      d <- experiment_data[[i]]
       means <- skew_mean(d$xi, d$omega, d$alpha)
-      lookup <- setNames(format_sig(means, 2), as.character(d$value))
+      data_keys <- paste(as.character(d$mods_id), as.character(d$value), sep = "\r")
+      keep <- !duplicated(data_keys)
+      lookup <- setNames(format_sig(means[keep], 2), data_keys[keep])
+      
       col_nm <- experiment_display(exp)
       if (col_nm %in% used_names) col_nm <- paste0(col_nm, " (", exp$policy_label, ")")
       used_names <- c(used_names, col_nm)
-      out[[col_nm]] <- unname(lookup[out$Bracket])
+      out[[col_nm]] <- unname(lookup[row_keys])
     }
+    
     out
   }, striped = TRUE, bordered = TRUE, spacing = "s")
 }
