@@ -228,6 +228,31 @@ skew_sd <- function(omega, alpha) {
   omega * sqrt(1 - 2 * delta^2 / pi)
 }
 
+# Numerically invert the fitted skew-normal distribution. This keeps the app
+# self-contained and avoids requiring an additional R package solely for
+# quartile calculations.
+skew_quantiles <- function(xi, omega, alpha, probs = c(0.25, 0.50, 0.75)) {
+  if (!all(is.finite(c(xi, omega, alpha))) || omega <= 0) {
+    return(rep(NA_real_, length(probs)))
+  }
+  
+  z <- seq(-10, 10, length.out = 10001)
+  density <- 2 * dnorm(z) * pnorm(alpha * z)
+  dz <- diff(z)
+  cdf <- c(0, cumsum((density[-length(density)] + density[-1]) * dz / 2))
+  total <- tail(cdf, 1)
+  if (!is.finite(total) || total <= 0) return(rep(NA_real_, length(probs)))
+  cdf <- cdf / total
+  
+  as.numeric(approx(
+    x = cdf,
+    y = xi + omega * z,
+    xout = probs,
+    ties = "ordered",
+    rule = 2
+  )$y)
+}
+
 safe_range <- function(dat) {
   lo <- min(dat$xi - 4 * dat$omega, na.rm = TRUE)
   hi <- max(dat$xi + 4 * dat$omega, na.rm = TRUE)
@@ -250,22 +275,27 @@ display_name <- function(x) {
 
 display_mod <- function(x) {
   mapping <- c(
-    can_count = "Candidate count",
-    tx_count = "Transplant count",
-    wait_death = "Waitlist deaths",
-    wld_ppy = "Waitlist deaths per patient-year",
-    tx_ppy = "Transplants per patient-year",
-    med_wlt = "Median waitlist time",
-    med_dist = "Median distance",
-    post_tx_death = "Post-transplant deaths",
-    ptd_ppy = "Post-transplant deaths per patient-year",
-    med_offer = "Median offers"
+    can_count = "Candidate Count",
+    tx_count = "Transplant Count",
+    wait_death = "Waitlist Deaths",
+    wld_ppy = "Waitlist Deaths per 100 Patient-Years",
+    tx_ppy = "Transplants per 100 Patient-Years",
+    med_wlt = "Median Waitlist Time",
+    med_dist = "Median Distance",
+    post_tx_death = "Post-Transplant Deaths",
+    ptd_ppy = "Post-Transplant Deaths per 100 Patient-Years",
+    med_offer = "Median Offers"
   )
   ifelse(x %in% names(mapping), unname(mapping[x]), gsub("_", " ", x))
 }
 
 display_category <- function(name, value) {
   value <- as.character(value)
+  
+  if (identical(name, "ov")) {
+    value[] <- "Overall"
+    return(value)
+  }
   
   if (identical(name, "male")) {
     key <- tolower(trimws(value))
@@ -290,15 +320,121 @@ display_category <- function(name, value) {
 
 format_result_table <- function(d) {
   if (nrow(d) == 0) return(d)
+  
+  quantiles <- t(vapply(seq_len(nrow(d)), function(i) {
+    skew_quantiles(d$xi[i], d$omega[i], d$alpha[i])
+  }, numeric(3)))
+  
+  one_decimal <- function(x) {
+    ifelse(is.finite(x), formatC(x, format = "f", digits = 1), "")
+  }
+  
   data.frame(
-    Bracket = as.character(d$value),
-    `Expected mean` = format_sig(skew_mean(d$xi, d$omega, d$alpha), 2),
-    `Estimated SD` = format_sig(skew_sd(d$omega, d$alpha), 2),
-    `Location parameter` = format_sig(d$xi, 2),
-    `Scale parameter` = format_sig(d$omega, 2),
-    `Shape / skewness` = format_sig(d$alpha, 2),
+    Category = display_category(as.character(d$name[1]), d$value),
+    Median = one_decimal(quantiles[, 2]),
+    IQR = paste0(one_decimal(quantiles[, 1]), "–", one_decimal(quantiles[, 3])),
     check.names = FALSE
   )
+}
+
+result_output_id <- function(prefix, mod_id) {
+  paste0(prefix, gsub("[^A-Za-z0-9_]", "_", mod_id))
+}
+
+result_palette <- function(n) {
+  grDevices::hcl.colors(max(n, 3), "Dark 3")[seq_len(n)]
+}
+
+draw_result_figure <- function(d, stratification, mod_id) {
+  outcome_label <- display_mod(mod_id)
+  old_par <- par(no.readonly = TRUE)
+  on.exit(par(old_par), add = TRUE)
+  
+  if (identical(stratification, "ov")) {
+    par(mar = c(4.5, 4.5, 4.5, 1.2))
+    xr <- safe_range(d)
+    x <- seq(xr[1], xr[2], length.out = 700)
+    density <- skew_pdf(x, d$xi[1], d$omega[1], d$alpha[1])
+    density[!is.finite(density)] <- 0
+    ymax <- max(density, na.rm = TRUE)
+    if (!is.finite(ymax) || ymax <= 0) ymax <- 1
+    color <- result_palette(1)[1]
+    
+    plot(
+      x, density,
+      type = "n",
+      ylim = c(0, ymax * 1.08),
+      xlab = outcome_label,
+      ylab = "Probability",
+      main = paste(strwrap(outcome_label, width = 46), collapse = "\n"),
+      cex.main = 0.95
+    )
+    grid(col = "#e6e6e6")
+    polygon(
+      c(x, rev(x)),
+      c(density, rep(0, length(density))),
+      col = grDevices::adjustcolor(color, alpha.f = 0.45),
+      border = NA
+    )
+    lines(x, density, lwd = 2, col = color)
+    return(invisible(NULL))
+  }
+  
+  group_values <- unique(as.character(d$value))
+  group_labels <- display_category(stratification, group_values)
+  colors <- result_palette(length(group_values))
+  yr <- safe_range(d)
+  y <- seq(yr[1], yr[2], length.out = 500)
+  figure_title <- paste(outcome_label, "Stratified by", display_name(stratification))
+  
+  # Extra bottom space is reserved for angled category labels. Drawing the
+  # labels ourselves prevents base R from suppressing labels that overlap.
+  par(mar = c(7.2, 4.5, 4.8, 1.2))
+  
+  plot(
+    NA,
+    xlim = c(0.5, length(group_values) + 0.5),
+    ylim = yr,
+    xaxt = "n",
+    xlab = "",
+    ylab = outcome_label,
+    main = paste(strwrap(figure_title, width = 46), collapse = "\n"),
+    cex.main = 0.90
+  )
+  grid(col = "#e6e6e6")
+  axis(1, at = seq_along(group_values), labels = FALSE)
+  
+  usr <- par("usr")
+  label_y <- usr[3] - 0.055 * diff(usr[3:4])
+  text(
+    x = seq_along(group_values),
+    y = label_y,
+    labels = group_labels,
+    srt = 35,
+    adj = 1,
+    xpd = NA,
+    cex = 0.78
+  )
+  mtext("Category", side = 1, line = 5.2)
+  
+  for (i in seq_along(group_values)) {
+    one <- d[as.character(d$value) == group_values[i], , drop = FALSE]
+    density <- skew_pdf(y, one$xi[1], one$omega[1], one$alpha[1])
+    density[!is.finite(density)] <- 0
+    max_density <- max(density, na.rm = TRUE)
+    width <- if (is.finite(max_density) && max_density > 0) density / max_density * 0.4 else rep(0, length(density))
+    
+    polygon(
+      c(i - width, rev(i + width)),
+      c(y, rev(y)),
+      col = grDevices::adjustcolor(colors[i], alpha.f = 0.65),
+      border = colors[i],
+      lwd = 1.2
+    )
+    
+    median_value <- skew_quantiles(one$xi[1], one$omega[1], one$alpha[1], 0.50)
+    points(i, median_value, pch = 19, cex = 0.9, col = "black")
+  }
 }
 
 experiment_display <- function(exp) {
@@ -357,7 +493,17 @@ ui <- navbarPage(
         .mode-button-row {margin-bottom:6px;}
         .mode-button-row .btn {margin-right:6px; min-width:118px; padding:4px 10px;}
         .compact-action {width:330px; max-width:100%; font-size:15px; padding:6px 12px;}
-                .plot-footnote {font-size:11px;color:#666;margin-top:3px;}
+        .projection-subtitle {font-size:16px;color:#555;margin:-2px 0 7px 0;}
+        .results-controls {display:flex;gap:24px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px;}
+        .results-controls .form-group {margin-bottom:0;}
+        .results-stratification {width:260px;max-width:100%;}
+        .results-view-toggle {min-width:220px;}
+        .results-dashboard {display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:12px;align-items:start;}
+        .result-dashboard-card {background:#fff;border:1px solid #ddd;border-radius:6px;padding:9px 11px;min-width:0;}
+        .result-dashboard-card h4 {margin:2px 0 7px 0;font-size:16px;}
+        .result-dashboard-card .table {margin-bottom:0;font-size:12px;}
+        .result-dashboard-card .table > thead > tr > th,
+        .result-dashboard-card .table > tbody > tr > td {padding:4px 6px;}
         .compact-page h3 {font-size:22px;margin-top:8px;margin-bottom:6px;}
         .compact-page h4 {font-size:16px;margin-top:2px;margin-bottom:5px;}
         .compact-result-card {background:#fff;border:1px solid #ddd;border-radius:6px;padding:7px 9px;margin-bottom:7px;}
@@ -491,48 +637,26 @@ ui <- navbarPage(
         conditionalPanel(
           condition = "output.has_current_experiment",
           h3(textOutput("result_title", inline = TRUE)),
+          tags$div(class = "projection-subtitle", "Two-year projections"),
           uiOutput("result_weight_summary"),
-          fluidRow(
-            column(
-              width = 3,
-              div(
-                class = "compact-result-card",
-                h4("Selections"),
-                selectInput("result_name", "Stratified by", choices = NULL),
-                selectInput("result_mod", "Outcome", choices = NULL)
-              )
+          tags$div(
+            class = "results-controls",
+            tags$div(
+              class = "results-stratification",
+              selectInput("result_name", "Stratified by", choices = NULL)
             ),
-            column(
-              width = 9,
-              div(
-                class = "compact-result-card",
-                h4("Distribution summary"),
-                tags$p(
-                  class = "text-muted",
-                  "Summary statistics are based on the outcomes of 500 simulation."
-                ),
-                tableOutput("result_summary_table")
+            tags$div(
+              class = "results-view-toggle",
+              radioButtons(
+                "result_view",
+                "Display results as",
+                choices = c("Tables" = "tables", "Figures" = "figures"),
+                selected = "tables",
+                inline = TRUE
               )
             )
           ),
-          div(
-            class = "compact-result-card",
-            plotOutput("result_distribution_plot", height = "360px"),
-            tags$div(
-              class = "plot-footnote",
-              "Note: this figure is based on skew-normal distributions fitted to the outcomes of 500 simulation replicates."
-            )
-          ),
-          
-          div(
-            class = "compact-result-card",
-            h4("Violin plot"),
-            plotOutput("result_violin_plot", height = "360px"),
-            tags$div(
-              class = "plot-footnote",
-              "Note: violin shapes represent skew-normal distributions fitted to the outcomes of 500 simulation replicates."
-            )
-          )
+          uiOutput("result_dashboard")
         )
       )
     )
@@ -635,14 +759,18 @@ server <- function(input, output, session) {
       class = "slider-grid",
       lapply(pd$weight_cols, function(w) {
         if (identical(mode, "default")) {
-          # In default mode, the sliders are disabled but should visually show
-          # the actual default-row weight values. Use a one-point slider whose
-          # displayed label is the default value.
-          vals <- round(as.numeric(pd$default_row[[w]]), 12)
-          is_fixed <- TRUE
+          # In Amended-CAS, a default value may not be one of the permitted
+          # custom stops. Include that exact value while default mode is shown
+          # so the handle and label represent the true default weight.
+          default_value <- round(as.numeric(pd$default_row[[w]]), 12)
+          vals <- pd$weight_values[[w]]
+          if (identical(pd$label, "Amended-CAS")) {
+            vals <- sort(unique(c(vals, default_value)))
+          }
+          is_fixed <- length(vals) <= 1
           disabled <- TRUE
-          slider_n <- 1
-          slider_value <- 1
+          slider_n <- max(1, length(vals))
+          slider_value <- which.min(abs(vals - default_value))
           label <- weight_labels[[w]]
         } else {
           # In custom mode, slider stops come only from non-default rows.
@@ -650,7 +778,9 @@ server <- function(input, output, session) {
           is_fixed <- length(vals) <= 1
           disabled <- is_fixed
           slider_n <- max(1, length(vals))
-          slider_value <- pd$custom_slider_index[[w]]
+          # If the exact default is unavailable here, start at the nearest
+          # permitted custom stop. A slight handle movement is expected.
+          slider_value <- value_to_slider_index(pd, w, pd$custom_start_values[[w]])
           label <- weight_labels[[w]]
           if (is_fixed) label <- paste0(label, " (fixed)")
         }
@@ -700,19 +830,20 @@ server <- function(input, output, session) {
   }
   
   observeEvent(input$use_default_weight, {
-    # Switching mode re-renders disabled one-point sliders that show the
-    # true default-row values. No separate slider update is needed here.
+    # Default mode keeps the full scale and handle position, but disables input.
     weight_mode("default")
     run_message_text(NULL)
   })
   
   observeEvent(input$use_custom_weight, {
-    pd <- current_policy_data()
-    weight_mode("custom")
+    # If custom mode is already active, keep the user's current slider
+    # positions instead of resetting them to the custom starting values.
+    if (identical(weight_mode(), "custom")) {
+      run_message_text(NULL)
+      return()
+    }
     
-    session$onFlushed(function() {
-      apply_values_to_sliders(pd, pd$custom_start_values)
-    }, once = TRUE)
+    weight_mode("custom")
     
     run_message_text(NULL)
   })
@@ -906,134 +1037,62 @@ server <- function(input, output, session) {
     updateSelectInput(session, "result_name", choices = choices, selected = selected)
   }, ignoreInit = FALSE)
   
-  observeEvent(list(experiment_skew(), input$result_name), {
+  available_result_mods <- reactive({
     req(input$result_name)
     dat <- experiment_skew()
-    mods <- unique(as.character(dat$mods_id[dat$name == input$result_name]))
-    choices <- setNames(mods, vapply(mods, display_mod, character(1)))
-    selected <- if (!is.null(isolate(input$result_mod)) && isolate(input$result_mod) %in% mods) isolate(input$result_mod) else mods[1]
-    updateSelectInput(session, "result_mod", choices = choices, selected = selected)
-  }, ignoreInit = FALSE)
-  
-  selected_result_data <- reactive({
-    req(input$result_name, input$result_mod)
-    d <- experiment_skew()
-    d[d$name == input$result_name & d$mods_id == input$result_mod, , drop = FALSE]
+    unique(as.character(dat$mods_id[dat$name == input$result_name]))
   })
   
-  output$result_summary_table <- renderTable({
-    d <- selected_result_data()
-    validate(need(nrow(d) > 0, "No summary is available."))
-    format_result_table(d)
-  }, striped = TRUE, bordered = TRUE, spacing = "s")
+  all_result_mods <- sort(unique(unlist(lapply(policy_data_list, function(pd) {
+    as.character(pd$skew$mods_id)
+  }))))
   
-  output$result_distribution_plot <- renderPlot({
-    d <- selected_result_data()
-    validate(need(nrow(d) > 0, "No distributions are available."))
-    xr <- safe_range(d)
-    x <- seq(xr[1], xr[2], length.out = 700)
-    group_values <- unique(as.character(d$value))
-    cols <- grDevices::hcl.colors(max(length(group_values), 3), "Dark 3")[seq_along(group_values)]
-    ltys <- seq_along(group_values)
-    curves <- lapply(group_values, function(g) {
-      one <- d[d$value == g, , drop = FALSE]
-      skew_pdf(x, one$xi[1], one$omega[1], one$alpha[1])
+  for (mod_id in all_result_mods) {
+    local({
+      current_mod <- mod_id
+      table_id <- result_output_id("result_table_", current_mod)
+      plot_id <- result_output_id("result_plot_", current_mod)
+      
+      output[[table_id]] <- renderTable({
+        req(identical(input$result_view, "tables"), input$result_name)
+        dat <- experiment_skew()
+        d <- dat[dat$name == input$result_name & dat$mods_id == current_mod, , drop = FALSE]
+        validate(need(nrow(d) > 0, "No summary is available."))
+        format_result_table(d)
+      }, striped = TRUE, bordered = TRUE, spacing = "s")
+      
+      output[[plot_id]] <- renderPlot({
+        req(identical(input$result_view, "figures"), input$result_name)
+        dat <- experiment_skew()
+        d <- dat[dat$name == input$result_name & dat$mods_id == current_mod, , drop = FALSE]
+        validate(need(nrow(d) > 0, "No figure is available."))
+        draw_result_figure(d, input$result_name, current_mod)
+      }, height = 380, res = 96)
     })
-    ymax <- max(unlist(curves), na.rm = TRUE)
-    if (!is.finite(ymax) || ymax <= 0) ymax <- 1
+  }
+  
+  output$result_dashboard <- renderUI({
+    req(input$result_name, input$result_view)
+    mods <- available_result_mods()
+    validate(need(length(mods) > 0, "No outcomes are available for this selection."))
     
-    plot(x, curves[[1]], type = "l", lwd = 2, col = cols[1], lty = ltys[1],
-         ylim = c(0, ymax * 1.08), xlab = display_mod(input$result_mod), ylab = "Density",
-         main = paste(display_name(input$result_name), "—", display_mod(input$result_mod)))
-    if (length(curves) > 1) for (j in 2:length(curves)) lines(x, curves[[j]], lwd = 2, col = cols[j], lty = ltys[j])
-    legend("topright", legend = group_values, col = cols, lty = ltys, lwd = 2,
-           title = if (input$result_name == "ov") "Result" else "Bracket", bty = "n", cex = 0.9)
-    grid()
-  })
-  output$result_violin_plot <- renderPlot({
-    d <- selected_result_data()
-    validate(need(nrow(d) > 0, "No distributions are available."))
-    
-    group_values <- unique(as.character(d$value))
-    n_groups <- length(group_values)
-    
-    # Determine common outcome range
-    yr <- safe_range(d)
-    y <- seq(yr[1], yr[2], length.out = 500)
-    
-    # Generate fitted densities for each bracket
-    densities <- lapply(group_values, function(g) {
-      one <- d[d$value == g, , drop = FALSE]
-      
-      dens <- skew_pdf(
-        y,
-        one$xi[1],
-        one$omega[1],
-        one$alpha[1]
-      )
-      
-      dens[!is.finite(dens)] <- 0
-      dens
-    })
-    
-    # Set up empty plot
-    plot(
-      NA,
-      xlim = c(0.5, n_groups + 0.5),
-      ylim = yr,
-      xaxt = "n",
-      xlab = if (input$result_name == "ov") "Result" else "Bracket",
-      ylab = display_mod(input$result_mod),
-      main = paste(
-        display_name(input$result_name),
-        "—",
-        display_mod(input$result_mod),
-        "Violin Plot"
-      )
+    tags$div(
+      class = "results-dashboard",
+      lapply(mods, function(mod_id) {
+        if (identical(input$result_view, "tables")) {
+          tags$div(
+            class = "result-dashboard-card",
+            tags$h4(display_mod(mod_id)),
+            tableOutput(result_output_id("result_table_", mod_id))
+          )
+        } else {
+          tags$div(
+            class = "result-dashboard-card",
+            plotOutput(result_output_id("result_plot_", mod_id), height = "380px")
+          )
+        }
+      })
     )
-    
-    axis(
-      1,
-      at = seq_along(group_values),
-      labels = group_values
-    )
-    
-    # Draw one violin for each bracket
-    for (i in seq_along(group_values)) {
-      
-      dens <- densities[[i]]
-      
-      # Scale width of each violin
-      if (max(dens, na.rm = TRUE) > 0) {
-        width <- dens / max(dens, na.rm = TRUE) * 0.4
-      } else {
-        width <- rep(0, length(dens))
-      }
-      
-      polygon(
-        c(i - width, rev(i + width)),
-        c(y, rev(y)),
-        border = "black"
-      )
-      
-      # Fitted distribution mean
-      one <- d[d$value == group_values[i], , drop = FALSE]
-      
-      fitted_mean <- skew_mean(
-        one$xi[1],
-        one$omega[1],
-        one$alpha[1]
-      )
-      
-      points(
-        i,
-        fitted_mean,
-        pch = 19,
-        cex = 1.2
-      )
-    }
-    
-    grid()
   })
   
   output$saved_experiments_table <- renderTable({
