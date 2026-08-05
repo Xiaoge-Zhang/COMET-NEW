@@ -36,6 +36,47 @@ policy_specs <- list(
   )
 )
 
+policy_hover_info <- list(
+  cas = list(
+    title = "CAS",
+    description = paste(
+      "Composite Allocation Score (CAS) – The original implementation of continuous distribution",
+      "in lung transplant, active from 3/9/2023 through 9/26/2023."
+    ),
+    url = "https://www.hrsa.gov/sites/default/files/hrsa/optn/policy-notice_lung_continuous-distribution.pdf"
+  ),
+  abocas = list(
+    title = "ABO-CAS",
+    description = paste(
+      "The revised Composite Allocation Score, active 9/27/2023–5/6/2026, which assigned",
+      "an additional 2 biological disadvantage points to candidates with ABO Type B blood",
+      "and an additional 5 points to candidates with Type O blood."
+    ),
+    url = "https://www.hrsa.gov/sites/default/files/hrsa/optn/lung_blood-type_special-pc-summer-2023.pdf"
+  ),
+  amendcas = list(
+    title = "Amended-CAS",
+    description = paste(
+      "The current implementation (since 5/7/2026) of continuous distribution in lung transplant,",
+      "which revises ABO-CAS by increasing placement efficiency weight from 10% to 15% of the",
+      "overall score while reducing the weights of other CAS components proportionally to maintain",
+      "a total of 100 CAS points. The amended CAS also revises the placement efficiency rating scale,",
+      "which assigns placement efficiency points based on the nautical mile distance between the donor",
+      "hospital and the transplant hospital."
+    ),
+    url = "https://www.hrsa.gov/optn/news-events/news/changes-lung-cas-now-in-effect"
+  ),
+  supplycas = list(
+    title = "Supply CAS",
+    description = paste(
+      "A hypothetical alternative CAS implementation that replaces each candidate’s height and ABO",
+      "blood type biological disadvantage points with a single subscore reflecting the expected rate",
+      "of eligible donors for a candidate given their height, blood type, and diagnosis group."
+    ),
+    url = "https://pmc.ncbi.nlm.nih.gov/articles/PMC11840864/"
+  )
+)
+
 weight_order <- c(
   "wl_weight", "post_tx_weight", "abo_weight", "height_weight",
   "efficiency_weight", "cpra_weight", "peds_weight", "pld_weight",
@@ -481,6 +522,15 @@ ui <- navbarPage(
         .run-controls-row {display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin-bottom:6px;}
         .run-controls-row .form-group {margin-bottom:0;}
         .policy-select-box {width:260px;max-width:100%;}
+        #policy-hover-card {
+          display:none; position:fixed; z-index:10000; width:410px; max-width:calc(100vw - 24px);
+          max-height:55vh; overflow-y:auto; padding:12px 14px; background:#fff;
+          border:1px solid #b8c2cc; border-radius:7px; box-shadow:0 5px 18px rgba(0,0,0,0.20);
+          color:#222; font-size:13px; line-height:1.4; pointer-events:auto;
+        }
+        #policy-hover-card .policy-hover-title {font-size:15px;font-weight:600;margin-bottom:5px;}
+        #policy-hover-card .policy-hover-description {margin-bottom:7px;}
+        #policy-hover-card a {font-weight:600;}
         .experiment-name-box {min-width:170px;margin-bottom:6px;}
         .label-box {width:330px;max-width:100%;}
         .requirements-card {background:#fffdf4;border:1px solid #eadca6;border-radius:6px;padding:7px 10px;margin-top:6px;font-size:12px;}
@@ -562,6 +612,85 @@ ui <- navbarPage(
           });
         }
 
+        var policyHoverHideTimer = null;
+
+        function policyHoverInfo(policyKey) {
+          var item = $('#policy-hover-data .policy-hover-data-item').filter(function() {
+            return $(this).attr('data-policy-key') === policyKey;
+          }).first();
+          if (!item.length) return null;
+          return {
+            title: item.attr('data-title') || '',
+            description: item.attr('data-description') || '',
+            url: item.attr('data-url') || ''
+          };
+        }
+
+        function cancelPolicyHoverHide() {
+          if (policyHoverHideTimer) {
+            clearTimeout(policyHoverHideTimer);
+            policyHoverHideTimer = null;
+          }
+        }
+
+        function hidePolicyHoverCard() {
+          cancelPolicyHoverHide();
+          $('#policy-hover-card').hide().attr('aria-hidden', 'true');
+        }
+
+        function schedulePolicyHoverHide() {
+          cancelPolicyHoverHide();
+          policyHoverHideTimer = setTimeout(hidePolicyHoverCard, 300);
+        }
+
+        function positionPolicyHoverCard(anchor) {
+          var card = $('#policy-hover-card');
+          if (!card.length || !anchor) return;
+          var rect = anchor.getBoundingClientRect();
+          card.css({display: 'block', visibility: 'hidden', left: '0px', top: '0px'});
+          var cardWidth = card.outerWidth();
+          var cardHeight = card.outerHeight();
+          var gap = 10;
+          var left = rect.right + gap;
+          var top = rect.top;
+
+          if (left + cardWidth > window.innerWidth - 12) {
+            left = rect.left - cardWidth - gap;
+          }
+          if (left < 12) left = 12;
+          if (top + cardHeight > window.innerHeight - 12) {
+            top = window.innerHeight - cardHeight - 12;
+          }
+          if (top < 12) top = 12;
+
+          card.css({left: left + 'px', top: top + 'px', visibility: 'visible'});
+        }
+
+        function showPolicyHoverCard(policyKey, anchor) {
+          var info = policyHoverInfo(policyKey);
+          if (!info) return;
+          cancelPolicyHoverHide();
+          $('#policy-hover-title').text(info.title);
+          $('#policy-hover-description').text(info.description);
+          $('#policy-hover-link').attr('href', info.url);
+          $('#policy-hover-card').attr('aria-hidden', 'false');
+          positionPolicyHoverCard(anchor);
+        }
+
+        $(document).on('mouseenter', '.policy-select-box .selectize-input', function() {
+          showPolicyHoverCard($('#policy_select').val(), this);
+        });
+        $(document).on('mouseleave', '.policy-select-box .selectize-input', schedulePolicyHoverHide);
+
+        $(document).on('mouseenter', '.policy-select-box .selectize-dropdown .option', function() {
+          showPolicyHoverCard($(this).attr('data-value'), this);
+        });
+        $(document).on('mouseleave', '.policy-select-box .selectize-dropdown .option', schedulePolicyHoverHide);
+
+        $(document).on('mouseenter', '#policy-hover-card', cancelPolicyHoverHide);
+        $(document).on('mouseleave', '#policy-hover-card', schedulePolicyHoverHide);
+        $(window).on('resize scroll', hidePolicyHoverCard);
+
         $(document).on('shiny:connected', function() {
           $('#experiment_label').attr('maxlength', 60);
           $('#saved_label_edit').attr('maxlength', 60);
@@ -575,6 +704,34 @@ ui <- navbarPage(
           setTimeout(applyAllowedValueLabels, 180);
         });
       ")),
+      tags$div(
+        id = "policy-hover-data",
+        style = "display:none;",
+        lapply(names(policy_hover_info), function(policy_key) {
+          info <- policy_hover_info[[policy_key]]
+          tags$div(
+            class = "policy-hover-data-item",
+            `data-policy-key` = policy_key,
+            `data-title` = info$title,
+            `data-description` = info$description,
+            `data-url` = info$url
+          )
+        })
+      ),
+      tags$div(
+        id = "policy-hover-card",
+        role = "tooltip",
+        `aria-hidden` = "true",
+        tags$div(id = "policy-hover-title", class = "policy-hover-title"),
+        tags$div(id = "policy-hover-description", class = "policy-hover-description"),
+        tags$a(
+          id = "policy-hover-link",
+          href = "#",
+          target = "_blank",
+          rel = "noopener noreferrer",
+          "Further details"
+        )
+      ),
       h3("Run a saved experiment"),
       fluidRow(
         column(
