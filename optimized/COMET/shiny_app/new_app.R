@@ -20,17 +20,17 @@ policy_specs <- list(
     skew_candidates = c("cas_params0_skew(3).csv", "cas_params0_skew(2).csv", "cas_params0_skew.csv")
   ),
   abocas = list(
-    label = "ABO-CAS",
+    label = "CAS-ABO Modification",
     params_candidates = c("abocas_params1(3).csv", "abocas_params1(2).csv", "abocas_params1.csv"),
     skew_candidates = c("abocas_params1_skew(3).csv", "abocas_params1_skew(2).csv", "abocas_params1_skew.csv")
   ),
   amendcas = list(
-    label = "Amended-CAS",
+    label = "CAS-Efficiency Modification",
     params_candidates = c("amendcas_params2(3).csv", "amendcas_params2(2).csv", "amendcas_params2.csv"),
     skew_candidates = c("amendcas_params2_skew(3).csv", "amendcas_params2_skew(2).csv", "amendcas_params2_skew.csv")
   ),
   supplycas = list(
-    label = "Supply CAS",
+    label = "CAS-Supply adjusted",
     params_candidates = c("supplycas_params3(3).csv", "supplycas_params3(2).csv", "supplycas_params3.csv"),
     skew_candidates = c("supplycas_params3_skew(3).csv", "supplycas_params3_skew(2).csv", "supplycas_params3_skew.csv")
   )
@@ -46,7 +46,7 @@ policy_hover_info <- list(
     url = "https://www.hrsa.gov/sites/default/files/hrsa/optn/policy-notice_lung_continuous-distribution.pdf"
   ),
   abocas = list(
-    title = "ABO-CAS",
+    title = "CAS-ABO Modification",
     description = paste(
       "The revised Composite Allocation Score, active 9/27/2023–5/6/2026, which assigned",
       "an additional 2 biological disadvantage points to candidates with ABO Type B blood",
@@ -55,23 +55,24 @@ policy_hover_info <- list(
     url = "https://www.hrsa.gov/sites/default/files/hrsa/optn/lung_blood-type_special-pc-summer-2023.pdf"
   ),
   amendcas = list(
-    title = "Amended-CAS",
+    title = "CAS-Efficiency Modification",
     description = paste(
       "The current implementation (since 5/7/2026) of continuous distribution in lung transplant,",
-      "which revises ABO-CAS by increasing placement efficiency weight from 10% to 15% of the",
-      "overall score while reducing the weights of other CAS components proportionally to maintain",
-      "a total of 100 CAS points. The amended CAS also revises the placement efficiency rating scale,",
+      "which revises the CAS ABO-modified policy by increasing placement efficiency weight from 10%",
+      "to 15% of the overall score while reducing the weights of other CAS components proportionally",
+      "to maintain a total of 100 CAS points. The amended CAS also revises the placement efficiency rating scale,",
       "which assigns placement efficiency points based on the nautical mile distance between the donor",
       "hospital and the transplant hospital."
     ),
     url = "https://www.hrsa.gov/optn/news-events/news/changes-lung-cas-now-in-effect"
   ),
   supplycas = list(
-    title = "Supply CAS",
+    title = "CAS-Supply adjusted",
     description = paste(
       "A hypothetical alternative CAS implementation that replaces each candidate’s height and ABO",
       "blood type biological disadvantage points with a single subscore reflecting the expected rate",
-      "of eligible donors for a candidate given their height, blood type, and diagnosis group."
+      "of eligible donors for a candidate given their height, blood type, and diagnosis group. For other",
+      "components of the CAS, the current policy (CAS-Efficiency Modification) calculation guidelines are used."
     ),
     url = "https://pmc.ncbi.nlm.nih.gov/articles/PMC11840864/"
   )
@@ -154,7 +155,7 @@ load_policy_data <- function(spec) {
     weight_cols
   )
   
-  if (identical(spec$label, "Amended-CAS")) {
+  if (identical(spec$label, "CAS-Efficiency Modification")) {
     custom_start_values <- round(custom_start_values / 0.05) * 0.05
     custom_start_values <- round(custom_start_values, 12)
   }
@@ -308,7 +309,8 @@ display_name <- function(x) {
     abo = "Blood type",
     age_cat = "Age category",
     male = "Sex",
-    reg = "Region",
+    reg = "Census Region (4)",
+    subreg = "Census Subregions (9)",
     wlauc_cat = "WLAUC category"
   )
   ifelse(x %in% names(mapping), unname(mapping[x]), gsub("_", " ", x))
@@ -336,6 +338,19 @@ display_category <- function(name, value) {
   if (identical(name, "ov")) {
     value[] <- "Overall"
     return(value)
+  }
+  
+  if (identical(name, "hgt_cat")) {
+    key <- gsub("\\s+", "", value)
+    mapping <- c(
+      "(-Inf,62.2]" = "<62.3",
+      "(62.2,65]" = "62.3-64.9",
+      "(65,67]" = "65.0-66.9",
+      "(67,70]" = "67.0-69.9",
+      "(70,Inf]" = "70.0+"
+    )
+    matched <- key %in% names(mapping)
+    value[matched] <- unname(mapping[key[matched]])
   }
   
   if (identical(name, "male")) {
@@ -407,9 +422,11 @@ draw_result_figure <- function(d, stratification, mod_id) {
       ylim = c(0, ymax * 1.08),
       xlab = outcome_label,
       ylab = "Probability",
+      yaxt = "n",
       main = paste(strwrap(outcome_label, width = 46), collapse = "\n"),
       cex.main = 0.95
     )
+    axis(2, labels = FALSE)
     grid(col = "#e6e6e6")
     polygon(
       c(x, rev(x)),
@@ -456,7 +473,7 @@ draw_result_figure <- function(d, stratification, mod_id) {
     xpd = NA,
     cex = 0.78
   )
-  mtext("Category", side = 1, line = 5.2)
+  mtext(display_name(stratification), side = 1, line = 2.7)
   
   for (i in seq_along(group_values)) {
     one <- d[as.character(d$value) == group_values[i], , drop = FALSE]
@@ -491,7 +508,7 @@ ui <- navbarPage(
   title = NULL,
   
   tabPanel(
-    title = "Run Experiment", value = "run",
+    title = "Run an Experiment", value = "run",
     fluidPage(
       tags$style(HTML("
         .weight-status {position: sticky; top: 15px;}
@@ -732,7 +749,7 @@ ui <- navbarPage(
           "Further details"
         )
       ),
-      h3("Run a saved experiment"),
+      h3("Run an Experiment"),
       fluidRow(
         column(
           width = 8,
@@ -916,14 +933,12 @@ server <- function(input, output, session) {
       class = "slider-grid",
       lapply(pd$weight_cols, function(w) {
         if (identical(mode, "default")) {
-          # In Amended-CAS, a default value may not be one of the permitted
-          # custom stops. Include that exact value while default mode is shown
-          # so the handle and label represent the true default weight.
+          # A dataset default may not be one of the permitted custom stops.
+          # Include its exact value while default mode is shown so the handle
+          # and label always represent the row marked default = TRUE.
           default_value <- round(as.numeric(pd$default_row[[w]]), 12)
           vals <- pd$weight_values[[w]]
-          if (identical(pd$label, "Amended-CAS")) {
-            vals <- sort(unique(c(vals, default_value)))
-          }
+          vals <- sort(unique(c(vals, default_value)))
           is_fixed <- length(vals) <= 1
           disabled <- TRUE
           slider_n <- max(1, length(vals))
@@ -1369,8 +1384,15 @@ server <- function(input, output, session) {
     category_labels <- display_category(input$comparison_name, all_pairs$value)
     category_numeric <- suppressWarnings(as.numeric(all_pairs$value))
     category_sort <- ifelse(is.na(category_numeric), NA_real_, category_numeric)
-    fallback_category_sort <- rank(as.character(category_labels), ties.method = "first")
-    category_sort[is.na(category_sort)] <- fallback_category_sort[is.na(category_sort)]
+    if (identical(input$comparison_name, "hgt_cat")) {
+      category_sort <- match(
+        category_labels,
+        c("<62.3", "62.3-64.9", "65.0-66.9", "67.0-69.9", "70.0+")
+      )
+    } else {
+      fallback_category_sort <- rank(as.character(category_labels), ties.method = "first")
+      category_sort[is.na(category_sort)] <- fallback_category_sort[is.na(category_sort)]
+    }
     
     all_pairs <- all_pairs[order(outcome_rank, category_sort, as.character(category_labels)), , drop = FALSE]
     category_labels <- display_category(input$comparison_name, all_pairs$value)
