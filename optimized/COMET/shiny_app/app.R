@@ -495,6 +495,78 @@ draw_result_figure <- function(d, stratification, mod_id) {
   }
 }
 
+export_note_lines <- c(
+  "Results based on simulation using COMET-Lung*",
+  "",
+  paste(
+    "*These simulated results are derived from the Computational Open-source Model for Evaluating",
+    "Transplantation (COMET) developed under National Institutes of Health (NIH) National Heart Lung &",
+    "Blood Institute (NHBI) grants R01HL153175 and R01HL153175."
+  ),
+  "",
+  "For methodologic details of the models, please see:",
+  "",
+  paste(
+    "Rose J, Gunsalus PR, Lehr CJ, Swiler MF, Dalton JE, Valapour M. A modular simulation framework for",
+    "organ allocation. J Heart Lung Transplant. 2024 Aug;43(8):1326-1335.",
+    "doi: 10.1016/j.healun.2024.04.063. Epub 2024 May 4. PMID: 38705499; PMCID: PMC11261589."
+  ),
+  "",
+  paste(
+    "Gunsalus PR, Rose J, Lehr CJ, Valapour M, Dalton JE. Creating synthetic populations in transplantation:",
+    "A Bayesian approach enabling simulation without registry re-sampling. PLoS One. 2024 Mar 21;19(3):e0296839.",
+    "doi: 10.1371/journal.pone.0296839. PMID: 38512928; PMCID: PMC10956776."
+  ),
+  "",
+  paste(
+    "Rose J, Gunsalus PR, Lehr CJ, Swiler MF, Dalton JE, Valapour M. A supply-based scoring approach to",
+    "account for biological disadvantages in accessing lung transplant. J Heart Lung Transplant.",
+    "2025 Feb;44(2):193-201. doi: 10.1016/j.healun.2024.09.022. Epub 2024 Oct 15.",
+    "PMID: 39412460; PMCID: PMC11840864."
+  )
+)
+
+file_slug <- function(x) {
+  x <- tolower(trimws(as.character(x)))
+  x <- gsub("[^a-z0-9]+", "-", x)
+  gsub("(^-+|-+$)", "", x)
+}
+
+append_export_notes <- function(dat) {
+  dat[] <- lapply(dat, as.character)
+  note_rows <- as.data.frame(
+    matrix("", nrow = length(export_note_lines) + 1, ncol = ncol(dat)),
+    stringsAsFactors = FALSE
+  )
+  names(note_rows) <- names(dat)
+  note_rows[-1, 1] <- export_note_lines
+  rbind(dat, note_rows)
+}
+
+write_result_pdf <- function(file, d, stratification, mod_id) {
+  grDevices::pdf(file, width = 11, height = 8.5, onefile = TRUE)
+  on.exit(grDevices::dev.off(), add = TRUE)
+  
+  layout(matrix(c(1, 2), ncol = 1), heights = c(0.68, 0.32))
+  par(oma = c(0, 0, 2.3, 0))
+  draw_result_figure(d, stratification, mod_id)
+  mtext(
+    "Results based on simulation using COMET-Lung*",
+    side = 3, outer = TRUE, line = 0.6, font = 2, cex = 1.05
+  )
+  
+  par(mar = c(0.4, 0.8, 0.4, 0.8), oma = c(0, 0, 0, 0))
+  plot.new()
+  footnote_text <- paste(export_note_lines[-c(1, 2)], collapse = "\n")
+  wrapped_footnote <- paste(
+    unlist(lapply(strsplit(footnote_text, "\n", fixed = TRUE)[[1]], function(x) {
+      if (nzchar(x)) strwrap(x, width = 170) else ""
+    })),
+    collapse = "\n"
+  )
+  text(0, 1, wrapped_footnote, adj = c(0, 1), cex = 0.47, xpd = NA)
+}
+
 experiment_display <- function(exp) {
   lab <- clean_label(exp$label)
   if (nzchar(lab)) paste0(exp$name, " — ", lab) else exp$name
@@ -837,6 +909,38 @@ ui <- navbarPage(
   ),
   
   tabPanel(
+    title = "Experiment Comparison", value = "comparison",
+    fluidPage(
+      h3("Compare saved experiments"),
+      fluidRow(
+        column(
+          width = 4,
+          selectInput("comparison_experiments", "Experiments", choices = character(0), multiple = TRUE),
+          tags$p(
+            class = "text-muted",
+            "Select multiple experiments. Remove individual experiments by backspacing."
+          ),
+          selectInput("comparison_name", "Stratified by", choices = NULL)
+        ),
+        column(
+          width = 8,
+          tags$div(class = "result-card",
+                   h4(textOutput("comparison_title", inline = TRUE)),
+                   tags$div(
+                     style = "margin:8px 0 12px 0;",
+                     downloadButton(
+                       "download_comparison_csv",
+                       "Download CSV",
+                       class = "btn-sm"
+                     )
+                   ),
+                   tableOutput("comparison_table"))
+        )
+      )
+    )
+  ),
+  
+  tabPanel(
     title = "Saved Experiments", value = "saved",
     fluidPage(
       tags$div(
@@ -865,30 +969,6 @@ ui <- navbarPage(
               actionButton("save_label_edit", "Save", class = "btn-default")
             )
           )
-        )
-      )
-    )
-  ),
-  
-  tabPanel(
-    title = "Experiment Comparison", value = "comparison",
-    fluidPage(
-      h3("Compare saved experiments"),
-      fluidRow(
-        column(
-          width = 4,
-          selectInput("comparison_experiments", "Experiments", choices = character(0), multiple = TRUE),
-          tags$p(
-            class = "text-muted",
-            "Select multiple experiments. Remove individual experiments by backspacing."
-          ),
-          selectInput("comparison_name", "Stratified by", choices = NULL)
-        ),
-        column(
-          width = 8,
-          tags$div(class = "result-card",
-                   h4(textOutput("comparison_title", inline = TRUE)),
-                   tableOutput("comparison_table"))
         )
       )
     )
@@ -1224,6 +1304,8 @@ server <- function(input, output, session) {
       current_mod <- mod_id
       table_id <- result_output_id("result_table_", current_mod)
       plot_id <- result_output_id("result_plot_", current_mod)
+      csv_id <- result_output_id("download_result_csv_", current_mod)
+      pdf_id <- result_output_id("download_result_pdf_", current_mod)
       
       output[[table_id]] <- renderTable({
         req(identical(input$result_view, "tables"), input$result_name)
@@ -1240,6 +1322,48 @@ server <- function(input, output, session) {
         validate(need(nrow(d) > 0, "No figure is available."))
         draw_result_figure(d, input$result_name, current_mod)
       }, height = 380, res = 96)
+      
+      output[[csv_id]] <- downloadHandler(
+        filename = function() {
+          exp <- current_experiment(); req(exp, input$result_name)
+          paste0(
+            file_slug(experiment_display(exp)), "-",
+            file_slug(display_mod(current_mod)), "-",
+            file_slug(display_name(input$result_name)), ".csv"
+          )
+        },
+        content = function(file) {
+          req(input$result_name)
+          dat <- experiment_skew()
+          d <- dat[dat$name == input$result_name & dat$mods_id == current_mod, , drop = FALSE]
+          validate(need(nrow(d) > 0, "No table is available for export."))
+          utils::write.csv(
+            append_export_notes(format_result_table(d)),
+            file,
+            row.names = FALSE,
+            na = ""
+          )
+        }
+      )
+      
+      output[[pdf_id]] <- downloadHandler(
+        filename = function() {
+          exp <- current_experiment(); req(exp, input$result_name)
+          paste0(
+            file_slug(experiment_display(exp)), "-",
+            file_slug(display_mod(current_mod)), "-",
+            file_slug(display_name(input$result_name)), ".pdf"
+          )
+        },
+        content = function(file) {
+          req(input$result_name)
+          dat <- experiment_skew()
+          d <- dat[dat$name == input$result_name & dat$mods_id == current_mod, , drop = FALSE]
+          validate(need(nrow(d) > 0, "No figure is available for export."))
+          write_result_pdf(file, d, input$result_name, current_mod)
+        },
+        contentType = "application/pdf"
+      )
     })
   }
   
@@ -1255,11 +1379,27 @@ server <- function(input, output, session) {
           tags$div(
             class = "result-dashboard-card",
             tags$h4(display_mod(mod_id)),
+            tags$div(
+              style = "margin-bottom:10px;",
+              downloadButton(
+                result_output_id("download_result_csv_", mod_id),
+                "Download CSV",
+                class = "btn-sm"
+              )
+            ),
             tableOutput(result_output_id("result_table_", mod_id))
           )
         } else {
           tags$div(
             class = "result-dashboard-card",
+            tags$div(
+              style = "margin-bottom:10px;",
+              downloadButton(
+                result_output_id("download_result_pdf_", mod_id),
+                "Download PDF",
+                class = "btn-sm"
+              )
+            ),
             plotOutput(result_output_id("result_plot_", mod_id), height = "380px")
           )
         }
@@ -1343,7 +1483,7 @@ server <- function(input, output, session) {
     }
   })
   
-  output$comparison_table <- renderTable({
+  comparison_table_data <- reactive({
     exps <- saved_experiments()
     req(length(input$comparison_experiments) > 0, input$comparison_name)
     
@@ -1424,7 +1564,32 @@ server <- function(input, output, session) {
     }
     
     out
+  })
+  
+  output$comparison_table <- renderTable({
+    comparison_table_data()
   }, striped = TRUE, bordered = TRUE, spacing = "s")
+  
+  output$download_comparison_csv <- downloadHandler(
+    filename = function() {
+      req(input$comparison_name)
+      paste0(
+        "comparison-",
+        file_slug(display_name(input$comparison_name)),
+        ".csv"
+      )
+    },
+    content = function(file) {
+      dat <- comparison_table_data()
+      validate(need(nrow(dat) > 0, "No comparison table is available for export."))
+      utils::write.csv(
+        append_export_notes(dat),
+        file,
+        row.names = FALSE,
+        na = ""
+      )
+    }
+  )
 }
 
 shinyApp(ui, server)
