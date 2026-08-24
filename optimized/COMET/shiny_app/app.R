@@ -21,16 +21,19 @@ policy_specs <- list(
   ),
   abocas = list(
     label = "ABO-CAS",
+    label = "CAS-ABO Modification",
     params_candidates = c("abocas_params1(3).csv", "abocas_params1(2).csv", "abocas_params1.csv"),
     skew_candidates = c("abocas_params1_skew(3).csv", "abocas_params1_skew(2).csv", "abocas_params1_skew.csv")
   ),
   amendcas = list(
     label = "Amended-CAS",
+    label = "CAS-Efficiency Modification",
     params_candidates = c("amendcas_params2(3).csv", "amendcas_params2(2).csv", "amendcas_params2.csv"),
     skew_candidates = c("amendcas_params2_skew(3).csv", "amendcas_params2_skew(2).csv", "amendcas_params2_skew.csv")
   ),
   supplycas = list(
     label = "Supply CAS",
+    label = "CAS-Supply adjusted",
     params_candidates = c("supplycas_params3(3).csv", "supplycas_params3(2).csv", "supplycas_params3.csv"),
     skew_candidates = c("supplycas_params3_skew(3).csv", "supplycas_params3_skew(2).csv", "supplycas_params3_skew.csv")
   )
@@ -47,6 +50,7 @@ policy_hover_info <- list(
   ),
   abocas = list(
     title = "ABO-CAS",
+    title = "CAS-ABO Modification",
     description = paste(
       "The revised Composite Allocation Score, active 9/27/2023–5/6/2026, which assigned",
       "an additional 2 biological disadvantage points to candidates with ABO Type B blood",
@@ -61,6 +65,12 @@ policy_hover_info <- list(
       "which revises ABO-CAS by increasing placement efficiency weight from 10% to 15% of the",
       "overall score while reducing the weights of other CAS components proportionally to maintain",
       "a total of 100 CAS points. The amended CAS also revises the placement efficiency rating scale,",
+    title = "CAS-Efficiency Modification",
+    description = paste(
+      "The current implementation (since 5/7/2026) of continuous distribution in lung transplant,",
+      "which revises the CAS ABO-modified policy by increasing placement efficiency weight from 10%",
+      "to 15% of the overall score while reducing the weights of other CAS components proportionally",
+      "to maintain a total of 100 CAS points. The amended CAS also revises the placement efficiency rating scale,",
       "which assigns placement efficiency points based on the nautical mile distance between the donor",
       "hospital and the transplant hospital."
     ),
@@ -72,6 +82,12 @@ policy_hover_info <- list(
       "A hypothetical alternative CAS implementation that replaces each candidate’s height and ABO",
       "blood type biological disadvantage points with a single subscore reflecting the expected rate",
       "of eligible donors for a candidate given their height, blood type, and diagnosis group."
+    title = "CAS-Supply adjusted",
+    description = paste(
+      "A hypothetical alternative CAS implementation that replaces each candidate’s height and ABO",
+      "blood type biological disadvantage points with a single subscore reflecting the expected rate",
+      "of eligible donors for a candidate given their height, blood type, and diagnosis group. For other",
+      "components of the CAS, the current policy (CAS-Efficiency Modification) calculation guidelines are used."
     ),
     url = "https://pmc.ncbi.nlm.nih.gov/articles/PMC11840864/"
   )
@@ -159,6 +175,12 @@ load_policy_data <- function(spec) {
     custom_start_values <- round(custom_start_values, 12)
   }
 
+  
+  if (identical(spec$label, "CAS-Efficiency Modification")) {
+    custom_start_values <- round(custom_start_values / 0.05) * 0.05
+    custom_start_values <- round(custom_start_values, 12)
+  }
+  
   # Slider stops are the actual unique values in the non-default rows only.
   # The resulting selected combination still must exist in the full params
   # table before it can run.
@@ -277,6 +299,7 @@ skew_quantiles <- function(xi, omega, alpha, probs = c(0.25, 0.50, 0.75)) {
     return(rep(NA_real_, length(probs)))
   }
 
+  
   z <- seq(-10, 10, length.out = 10001)
   density <- 2 * dnorm(z) * pnorm(alpha * z)
   dz <- diff(z)
@@ -285,6 +308,7 @@ skew_quantiles <- function(xi, omega, alpha, probs = c(0.25, 0.50, 0.75)) {
   if (!is.finite(total) || total <= 0) return(rep(NA_real_, length(probs)))
   cdf <- cdf / total
 
+  
   as.numeric(approx(
     x = cdf,
     y = xi + omega * z,
@@ -309,6 +333,8 @@ display_name <- function(x) {
     age_cat = "Age category",
     male = "Sex",
     reg = "Region",
+    reg = "Census Region (4)",
+    subreg = "Census Subregions (9)",
     wlauc_cat = "WLAUC category"
   )
   ifelse(x %in% names(mapping), unname(mapping[x]), gsub("_", " ", x))
@@ -333,11 +359,26 @@ display_mod <- function(x) {
 display_category <- function(name, value) {
   value <- as.character(value)
 
+  
   if (identical(name, "ov")) {
     value[] <- "Overall"
     return(value)
   }
 
+  
+  if (identical(name, "hgt_cat")) {
+    key <- gsub("\\s+", "", value)
+    mapping <- c(
+      "(-Inf,62.2]" = "<62.3",
+      "(62.2,65]" = "62.3-64.9",
+      "(65,67]" = "65.0-66.9",
+      "(67,70]" = "67.0-69.9",
+      "(70,Inf]" = "70.0+"
+    )
+    matched <- key %in% names(mapping)
+    value[matched] <- unname(mapping[key[matched]])
+  }
+  
   if (identical(name, "male")) {
     key <- tolower(trimws(value))
     mapping <- c(
@@ -356,6 +397,7 @@ display_category <- function(name, value) {
     value[matched] <- unname(mapping[key[matched]])
   }
 
+  
   value
 }
 
@@ -370,6 +412,15 @@ format_result_table <- function(d) {
     ifelse(is.finite(x), formatC(x, format = "f", digits = 1), "")
   }
 
+  
+  quantiles <- t(vapply(seq_len(nrow(d)), function(i) {
+    skew_quantiles(d$xi[i], d$omega[i], d$alpha[i])
+  }, numeric(3)))
+  
+  one_decimal <- function(x) {
+    ifelse(is.finite(x), formatC(x, format = "f", digits = 1), "")
+  }
+  
   data.frame(
     Category = display_category(as.character(d$name[1]), d$value),
     Median = one_decimal(quantiles[, 2]),
@@ -391,6 +442,7 @@ draw_result_figure <- function(d, stratification, mod_id) {
   old_par <- par(no.readonly = TRUE)
   on.exit(par(old_par), add = TRUE)
 
+  
   if (identical(stratification, "ov")) {
     par(mar = c(4.5, 4.5, 4.5, 1.2))
     xr <- safe_range(d)
@@ -401,6 +453,7 @@ draw_result_figure <- function(d, stratification, mod_id) {
     if (!is.finite(ymax) || ymax <= 0) ymax <- 1
     color <- result_palette(1)[1]
 
+    
     plot(
       x, density,
       type = "n",
@@ -410,6 +463,11 @@ draw_result_figure <- function(d, stratification, mod_id) {
       main = paste(strwrap(outcome_label, width = 46), collapse = "\n"),
       cex.main = 0.95
     )
+      yaxt = "n",
+      main = paste(strwrap(outcome_label, width = 46), collapse = "\n"),
+      cex.main = 0.95
+    )
+    axis(2, labels = FALSE)
     grid(col = "#e6e6e6")
     polygon(
       c(x, rev(x)),
@@ -421,6 +479,7 @@ draw_result_figure <- function(d, stratification, mod_id) {
     return(invisible(NULL))
   }
 
+  
   group_values <- unique(as.character(d$value))
   group_labels <- display_category(stratification, group_values)
   colors <- result_palette(length(group_values))
@@ -432,6 +491,11 @@ draw_result_figure <- function(d, stratification, mod_id) {
   # labels ourselves prevents base R from suppressing labels that overlap.
   par(mar = c(7.2, 4.5, 4.8, 1.2))
 
+  
+  # Extra bottom space is reserved for angled category labels. Drawing the
+  # labels ourselves prevents base R from suppressing labels that overlap.
+  par(mar = c(7.2, 4.5, 4.8, 1.2))
+  
   plot(
     NA,
     xlim = c(0.5, length(group_values) + 0.5),
@@ -445,6 +509,7 @@ draw_result_figure <- function(d, stratification, mod_id) {
   grid(col = "#e6e6e6")
   axis(1, at = seq_along(group_values), labels = FALSE)
 
+  
   usr <- par("usr")
   label_y <- usr[3] - 0.055 * diff(usr[3:4])
   text(
@@ -458,6 +523,8 @@ draw_result_figure <- function(d, stratification, mod_id) {
   )
   mtext("Category", side = 1, line = 5.2)
 
+  mtext(display_name(stratification), side = 1, line = 2.7)
+  
   for (i in seq_along(group_values)) {
     one <- d[as.character(d$value) == group_values[i], , drop = FALSE]
     density <- skew_pdf(y, one$xi[1], one$omega[1], one$alpha[1])
@@ -465,6 +532,7 @@ draw_result_figure <- function(d, stratification, mod_id) {
     max_density <- max(density, na.rm = TRUE)
     width <- if (is.finite(max_density) && max_density > 0) density / max_density * 0.4 else rep(0, length(density))
 
+    
     polygon(
       c(i - width, rev(i + width)),
       c(y, rev(y)),
@@ -473,9 +541,82 @@ draw_result_figure <- function(d, stratification, mod_id) {
       lwd = 1.2
     )
 
+    
     median_value <- skew_quantiles(one$xi[1], one$omega[1], one$alpha[1], 0.50)
     points(i, median_value, pch = 19, cex = 0.9, col = "black")
   }
+}
+
+export_note_lines <- c(
+  "Results based on simulation using COMET-Lung*",
+  "",
+  paste(
+    "*These simulated results are derived from the Computational Open-source Model for Evaluating",
+    "Transplantation (COMET) developed under National Institutes of Health (NIH) National Heart Lung &",
+    "Blood Institute (NHBI) grants R01HL153175 and R01HL153175."
+  ),
+  "",
+  "For methodologic details of the models, please see:",
+  "",
+  paste(
+    "Rose J, Gunsalus PR, Lehr CJ, Swiler MF, Dalton JE, Valapour M. A modular simulation framework for",
+    "organ allocation. J Heart Lung Transplant. 2024 Aug;43(8):1326-1335.",
+    "doi: 10.1016/j.healun.2024.04.063. Epub 2024 May 4. PMID: 38705499; PMCID: PMC11261589."
+  ),
+  "",
+  paste(
+    "Gunsalus PR, Rose J, Lehr CJ, Valapour M, Dalton JE. Creating synthetic populations in transplantation:",
+    "A Bayesian approach enabling simulation without registry re-sampling. PLoS One. 2024 Mar 21;19(3):e0296839.",
+    "doi: 10.1371/journal.pone.0296839. PMID: 38512928; PMCID: PMC10956776."
+  ),
+  "",
+  paste(
+    "Rose J, Gunsalus PR, Lehr CJ, Swiler MF, Dalton JE, Valapour M. A supply-based scoring approach to",
+    "account for biological disadvantages in accessing lung transplant. J Heart Lung Transplant.",
+    "2025 Feb;44(2):193-201. doi: 10.1016/j.healun.2024.09.022. Epub 2024 Oct 15.",
+    "PMID: 39412460; PMCID: PMC11840864."
+  )
+)
+
+file_slug <- function(x) {
+  x <- tolower(trimws(as.character(x)))
+  x <- gsub("[^a-z0-9]+", "-", x)
+  gsub("(^-+|-+$)", "", x)
+}
+
+append_export_notes <- function(dat) {
+  dat[] <- lapply(dat, as.character)
+  note_rows <- as.data.frame(
+    matrix("", nrow = length(export_note_lines) + 1, ncol = ncol(dat)),
+    stringsAsFactors = FALSE
+  )
+  names(note_rows) <- names(dat)
+  note_rows[-1, 1] <- export_note_lines
+  rbind(dat, note_rows)
+}
+
+write_result_pdf <- function(file, d, stratification, mod_id) {
+  grDevices::pdf(file, width = 11, height = 8.5, onefile = TRUE)
+  on.exit(grDevices::dev.off(), add = TRUE)
+  
+  layout(matrix(c(1, 2), ncol = 1), heights = c(0.68, 0.32))
+  par(oma = c(0, 0, 2.3, 0))
+  draw_result_figure(d, stratification, mod_id)
+  mtext(
+    "Results based on simulation using COMET-Lung*",
+    side = 3, outer = TRUE, line = 0.6, font = 2, cex = 1.05
+  )
+  
+  par(mar = c(0.4, 0.8, 0.4, 0.8), oma = c(0, 0, 0, 0))
+  plot.new()
+  footnote_text <- paste(export_note_lines[-c(1, 2)], collapse = "\n")
+  wrapped_footnote <- paste(
+    unlist(lapply(strsplit(footnote_text, "\n", fixed = TRUE)[[1]], function(x) {
+      if (nzchar(x)) strwrap(x, width = 170) else ""
+    })),
+    collapse = "\n"
+  )
+  text(0, 1, wrapped_footnote, adj = c(0, 1), cex = 0.47, xpd = NA)
 }
 
 experiment_display <- function(exp) {
@@ -492,6 +633,9 @@ ui <- navbarPage(
 
   tabPanel(
     title = "Run Experiment", value = "run",
+  
+  tabPanel(
+    title = "Run an Experiment", value = "run",
     fluidPage(
       tags$style(HTML("
         .weight-status {position: sticky; top: 15px;}
@@ -733,6 +877,7 @@ ui <- navbarPage(
         )
       ),
       h3("Run a saved experiment"),
+      h3("Run an Experiment"),
       fluidRow(
         column(
           width = 8,
@@ -820,6 +965,38 @@ ui <- navbarPage(
   ),
   
   tabPanel(
+    title = "Experiment Comparison", value = "comparison",
+    fluidPage(
+      h3("Compare saved experiments"),
+      fluidRow(
+        column(
+          width = 4,
+          selectInput("comparison_experiments", "Experiments", choices = character(0), multiple = TRUE),
+          tags$p(
+            class = "text-muted",
+            "Select multiple experiments. Remove individual experiments by backspacing."
+          ),
+          selectInput("comparison_name", "Stratified by", choices = NULL)
+        ),
+        column(
+          width = 8,
+          tags$div(class = "result-card",
+                   h4(textOutput("comparison_title", inline = TRUE)),
+                   tags$div(
+                     style = "margin:8px 0 12px 0;",
+                     downloadButton(
+                       "download_comparison_csv",
+                       "Download CSV",
+                       class = "btn-sm"
+                     )
+                   ),
+                   tableOutput("comparison_table"))
+        )
+      )
+    )
+  ),
+  
+  tabPanel(
     title = "Saved Experiments", value = "saved",
     fluidPage(
       tags$div(
@@ -887,6 +1064,7 @@ server <- function(input, output, session) {
   run_message_text <- reactiveVal(NULL)
   weight_mode <- reactiveVal("default")
 
+  
   current_policy_key <- reactive({
     key <- input$policy_select
     if (is.null(key) || !(key %in% names(policy_data_list))) names(policy_data_list)[1] else key
@@ -924,6 +1102,12 @@ server <- function(input, output, session) {
           if (identical(pd$label, "Amended-CAS")) {
             vals <- sort(unique(c(vals, default_value)))
           }
+          # A dataset default may not be one of the permitted custom stops.
+          # Include its exact value while default mode is shown so the handle
+          # and label always represent the row marked default = TRUE.
+          default_value <- round(as.numeric(pd$default_row[[w]]), 12)
+          vals <- pd$weight_values[[w]]
+          vals <- sort(unique(c(vals, default_value)))
           is_fixed <- length(vals) <= 1
           disabled <- TRUE
           slider_n <- max(1, length(vals))
@@ -1002,6 +1186,9 @@ server <- function(input, output, session) {
 
     weight_mode("custom")
 
+    
+    weight_mode("custom")
+    
     run_message_text(NULL)
   })
   
@@ -1194,6 +1381,7 @@ server <- function(input, output, session) {
     updateSelectInput(session, "result_name", choices = choices, selected = selected)
   }, ignoreInit = FALSE)
 
+  
   available_result_mods <- reactive({
     req(input$result_name)
     dat <- experiment_skew()
@@ -1204,12 +1392,20 @@ server <- function(input, output, session) {
     as.character(pd$skew$mods_id)
   }))))
 
+  
+  all_result_mods <- sort(unique(unlist(lapply(policy_data_list, function(pd) {
+    as.character(pd$skew$mods_id)
+  }))))
+  
   for (mod_id in all_result_mods) {
     local({
       current_mod <- mod_id
       table_id <- result_output_id("result_table_", current_mod)
       plot_id <- result_output_id("result_plot_", current_mod)
 
+      csv_id <- result_output_id("download_result_csv_", current_mod)
+      pdf_id <- result_output_id("download_result_pdf_", current_mod)
+      
       output[[table_id]] <- renderTable({
         req(identical(input$result_view, "tables"), input$result_name)
         dat <- experiment_skew()
@@ -1218,6 +1414,7 @@ server <- function(input, output, session) {
         format_result_table(d)
       }, striped = TRUE, bordered = TRUE, spacing = "s")
 
+      
       output[[plot_id]] <- renderPlot({
         req(identical(input$result_view, "figures"), input$result_name)
         dat <- experiment_skew()
@@ -1228,11 +1425,57 @@ server <- function(input, output, session) {
     })
   }
 
+      
+      output[[csv_id]] <- downloadHandler(
+        filename = function() {
+          exp <- current_experiment(); req(exp, input$result_name)
+          paste0(
+            file_slug(experiment_display(exp)), "-",
+            file_slug(display_mod(current_mod)), "-",
+            file_slug(display_name(input$result_name)), ".csv"
+          )
+        },
+        content = function(file) {
+          req(input$result_name)
+          dat <- experiment_skew()
+          d <- dat[dat$name == input$result_name & dat$mods_id == current_mod, , drop = FALSE]
+          validate(need(nrow(d) > 0, "No table is available for export."))
+          utils::write.csv(
+            append_export_notes(format_result_table(d)),
+            file,
+            row.names = FALSE,
+            na = ""
+          )
+        }
+      )
+      
+      output[[pdf_id]] <- downloadHandler(
+        filename = function() {
+          exp <- current_experiment(); req(exp, input$result_name)
+          paste0(
+            file_slug(experiment_display(exp)), "-",
+            file_slug(display_mod(current_mod)), "-",
+            file_slug(display_name(input$result_name)), ".pdf"
+          )
+        },
+        content = function(file) {
+          req(input$result_name)
+          dat <- experiment_skew()
+          d <- dat[dat$name == input$result_name & dat$mods_id == current_mod, , drop = FALSE]
+          validate(need(nrow(d) > 0, "No figure is available for export."))
+          write_result_pdf(file, d, input$result_name, current_mod)
+        },
+        contentType = "application/pdf"
+      )
+    })
+  }
+  
   output$result_dashboard <- renderUI({
     req(input$result_name, input$result_view)
     mods <- available_result_mods()
     validate(need(length(mods) > 0, "No outcomes are available for this selection."))
 
+    
     tags$div(
       class = "results-dashboard",
       lapply(mods, function(mod_id) {
@@ -1240,11 +1483,27 @@ server <- function(input, output, session) {
           tags$div(
             class = "result-dashboard-card",
             tags$h4(display_mod(mod_id)),
+            tags$div(
+              style = "margin-bottom:10px;",
+              downloadButton(
+                result_output_id("download_result_csv_", mod_id),
+                "Download CSV",
+                class = "btn-sm"
+              )
+            ),
             tableOutput(result_output_id("result_table_", mod_id))
           )
         } else {
           tags$div(
             class = "result-dashboard-card",
+            tags$div(
+              style = "margin-bottom:10px;",
+              downloadButton(
+                result_output_id("download_result_pdf_", mod_id),
+                "Download PDF",
+                class = "btn-sm"
+              )
+            ),
             plotOutput(result_output_id("result_plot_", mod_id), height = "380px")
           )
         }
@@ -1319,6 +1578,7 @@ server <- function(input, output, session) {
     updateSelectInput(session, "comparison_name", choices = choices, selected = selected)
   })
 
+  
   output$comparison_title <- renderText({
     req(input$comparison_name)
     if (identical(input$comparison_name, "ov")) {
@@ -1332,6 +1592,11 @@ server <- function(input, output, session) {
     exps <- saved_experiments()
     req(length(input$comparison_experiments) > 0, input$comparison_name)
 
+  
+  comparison_table_data <- reactive({
+    exps <- saved_experiments()
+    req(length(input$comparison_experiments) > 0, input$comparison_name)
+    
     selected_exps <- exps[input$comparison_experiments]
     experiment_data <- lapply(selected_exps, function(exp) {
       pd <- policy_data_list[[exp$policy_key]]
@@ -1343,6 +1608,7 @@ server <- function(input, output, session) {
       ]
     })
 
+    
     pair_list <- lapply(experiment_data, function(d) {
       data.frame(
         mods_id = as.character(d$mods_id),
@@ -1356,6 +1622,10 @@ server <- function(input, output, session) {
     all_pairs <- unique(do.call(rbind, pair_list))
     validate(need(nrow(all_pairs) > 0, "No comparison data are available."))
 
+    
+    all_pairs <- unique(do.call(rbind, pair_list))
+    validate(need(nrow(all_pairs) > 0, "No comparison data are available."))
+    
     # Sort comparison rows by outcome first, then category within each outcome.
     # This keeps categories such as Female/Male adjacent for the same outcome,
     # instead of showing all outcomes for one category before the next category.
@@ -1385,6 +1655,35 @@ server <- function(input, output, session) {
     row_keys <- paste(all_pairs$mods_id, all_pairs$value, sep = "\r")
     used_names <- character(0)
 
+    
+    category_labels <- display_category(input$comparison_name, all_pairs$value)
+    category_numeric <- suppressWarnings(as.numeric(all_pairs$value))
+    category_sort <- ifelse(is.na(category_numeric), NA_real_, category_numeric)
+    if (identical(input$comparison_name, "hgt_cat")) {
+      category_sort <- match(
+        category_labels,
+        c("<62.3", "62.3-64.9", "65.0-66.9", "67.0-69.9", "70.0+")
+      )
+    } else {
+      fallback_category_sort <- rank(as.character(category_labels), ties.method = "first")
+      category_sort[is.na(category_sort)] <- fallback_category_sort[is.na(category_sort)]
+    }
+    
+    all_pairs <- all_pairs[order(outcome_rank, category_sort, as.character(category_labels)), , drop = FALSE]
+    category_labels <- display_category(input$comparison_name, all_pairs$value)
+    
+    out <- data.frame(
+      Outcome = vapply(all_pairs$mods_id, display_mod, character(1)),
+      stringsAsFactors = FALSE,
+      check.names = FALSE
+    )
+    if (!identical(input$comparison_name, "ov")) {
+      out$Category <- category_labels
+    }
+    
+    row_keys <- paste(all_pairs$mods_id, all_pairs$value, sep = "\r")
+    used_names <- character(0)
+    
     for (i in seq_along(selected_exps)) {
       exp <- selected_exps[[i]]
       d <- experiment_data[[i]]
@@ -1393,6 +1692,7 @@ server <- function(input, output, session) {
       keep <- !duplicated(data_keys)
       lookup <- setNames(format_sig(means[keep], 2), data_keys[keep])
 
+      
       col_nm <- experiment_display(exp)
       if (col_nm %in% used_names) col_nm <- paste0(col_nm, " (", exp$policy_label, ")")
       used_names <- c(used_names, col_nm)
@@ -1401,6 +1701,34 @@ server <- function(input, output, session) {
 
     out
   }, striped = TRUE, bordered = TRUE, spacing = "s")
+    
+    out
+  })
+  
+  output$comparison_table <- renderTable({
+    comparison_table_data()
+  }, striped = TRUE, bordered = TRUE, spacing = "s")
+  
+  output$download_comparison_csv <- downloadHandler(
+    filename = function() {
+      req(input$comparison_name)
+      paste0(
+        "comparison-",
+        file_slug(display_name(input$comparison_name)),
+        ".csv"
+      )
+    },
+    content = function(file) {
+      dat <- comparison_table_data()
+      validate(need(nrow(dat) > 0, "No comparison table is available for export."))
+      utils::write.csv(
+        append_export_notes(dat),
+        file,
+        row.names = FALSE,
+        na = ""
+      )
+    }
+  )
 }
 
 shinyApp(ui, server)
