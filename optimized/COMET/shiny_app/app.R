@@ -20,17 +20,17 @@ policy_specs <- list(
     skew_candidates = c("cas_params0_skew(3).csv", "cas_params0_skew(2).csv", "cas_params0_skew.csv")
   ),
   abocas = list(
-    label = "ABO-CAS",
+    label = "CAS-ABO Modification",
     params_candidates = c("abocas_params1(3).csv", "abocas_params1(2).csv", "abocas_params1.csv"),
     skew_candidates = c("abocas_params1_skew(3).csv", "abocas_params1_skew(2).csv", "abocas_params1_skew.csv")
   ),
   amendcas = list(
-    label = "Amended-CAS",
+    label = "CAS-Efficiency Modification",
     params_candidates = c("amendcas_params2(3).csv", "amendcas_params2(2).csv", "amendcas_params2.csv"),
     skew_candidates = c("amendcas_params2_skew(3).csv", "amendcas_params2_skew(2).csv", "amendcas_params2_skew.csv")
   ),
   supplycas = list(
-    label = "Supply CAS",
+    label = "CAS-Supply adjusted",
     params_candidates = c("supplycas_params3(3).csv", "supplycas_params3(2).csv", "supplycas_params3.csv"),
     skew_candidates = c("supplycas_params3_skew(3).csv", "supplycas_params3_skew(2).csv", "supplycas_params3_skew.csv")
   )
@@ -46,7 +46,7 @@ policy_hover_info <- list(
     url = "https://www.hrsa.gov/sites/default/files/hrsa/optn/policy-notice_lung_continuous-distribution.pdf"
   ),
   abocas = list(
-    title = "ABO-CAS",
+    title = "CAS-ABO Modification",
     description = paste(
       "The revised Composite Allocation Score, active 9/27/2023–5/6/2026, which assigned",
       "an additional 2 biological disadvantage points to candidates with ABO Type B blood",
@@ -55,10 +55,10 @@ policy_hover_info <- list(
     url = "https://www.hrsa.gov/sites/default/files/hrsa/optn/lung_blood-type_special-pc-summer-2023.pdf"
   ),
   amendcas = list(
-    title = "Amended-CAS",
+    title = "CAS-Efficiency Modification",
     description = paste(
       "The current implementation (since 5/7/2026) of continuous distribution in lung transplant,",
-      "which revises ABO-CAS by increasing placement efficiency weight from 10% to 15% of the",
+      "which revises the CAS ABO-modified policy by increasing placement efficiency weight from 10% to 15% of the",
       "overall score while reducing the weights of other CAS components proportionally to maintain",
       "a total of 100 CAS points. The amended CAS also revises the placement efficiency rating scale,",
       "which assigns placement efficiency points based on the nautical mile distance between the donor",
@@ -67,11 +67,12 @@ policy_hover_info <- list(
     url = "https://www.hrsa.gov/optn/news-events/news/changes-lung-cas-now-in-effect"
   ),
   supplycas = list(
-    title = "Supply CAS",
+    title = "CAS-Supply adjusted",
     description = paste(
       "A hypothetical alternative CAS implementation that replaces each candidate’s height and ABO",
       "blood type biological disadvantage points with a single subscore reflecting the expected rate",
-      "of eligible donors for a candidate given their height, blood type, and diagnosis group."
+      "of eligible donors for a candidate given their height, blood type, and diagnosis group.",
+      "For other components of the CAS, the current policy (CAS-Efficiency Modification) calculation guidelines are used."
     ),
     url = "https://pmc.ncbi.nlm.nih.gov/articles/PMC11840864/"
   )
@@ -188,7 +189,7 @@ load_policy_data <- function(spec) {
     weight_cols
   )
 
-  if (identical(spec$label, "Amended-CAS")) {
+  if (identical(spec$label, "CAS-Efficiency Modification")) {
     custom_start_values <- round(custom_start_values / 0.05) * 0.05
     custom_start_values <- round(custom_start_values, 12)
   }
@@ -262,9 +263,40 @@ safe_filename <- function(x) {
   ifelse(nzchar(x), x, "download")
 }
 
+ascii_csv_text <- function(x) {
+  x <- as.character(x)
+  x <- gsub("\u2014|\u2013|\u2212", "-", x, perl = TRUE)
+  x <- gsub("\u2018|\u2019", "'", x, perl = TRUE)
+  x <- gsub("\u201c|\u201d", "'", x, perl = TRUE)
+  x
+}
+
+comparison_download_table <- function(out) {
+  out <- as.data.frame(out, stringsAsFactors = FALSE, check.names = FALSE)
+  names(out) <- ascii_csv_text(names(out))
+  for (nm in names(out)) {
+    if (is.character(out[[nm]])) out[[nm]] <- ascii_csv_text(out[[nm]])
+  }
+  out
+}
+
+short_download_code <- function(n = 4) {
+  paste0(sample(c(LETTERS, 0:9), n, replace = TRUE), collapse = "")
+}
+
 format_weight_value <- function(x) {
-  # Display weights consistently to two digits after the decimal point.
-  # The underlying calculations still use the numeric CSV values.
+  # Slider labels and the current-weights table use up to four decimal
+  # places, while retaining at least two (for example, 0.2500 -> 0.25).
+  # The underlying calculations still use the unformatted numeric values.
+  values <- as.numeric(x)
+  out <- formatC(values, format = "f", digits = 4)
+  out <- sub("(\\.[0-9]{2,}?)0+$", "\\1", out, perl = TRUE)
+  out[is.na(values)] <- ""
+  out
+}
+
+format_weight_label_value <- function(x) {
+  # Keep compact experiment-label values at their original two decimals.
   ifelse(
     is.na(as.numeric(x)),
     "",
@@ -284,7 +316,7 @@ auto_experiment_label <- function(pd, values, mode) {
   }
 
   val <- function(w) {
-    if (w %in% names(values)) format_weight_value(values[[w]]) else "NA"
+    if (w %in% names(values)) format_weight_label_value(values[[w]]) else "NA"
   }
 
   if ("bio_weight" %in% names(values) && !("abo_weight" %in% names(values)) && !("height_weight" %in% names(values))) {
@@ -295,7 +327,7 @@ auto_experiment_label <- function(pd, values, mode) {
       "_EF", val("efficiency_weight"),
       "_BP", val("bio_weight")
     )
-  } else if (identical(pd$label, "Supply CAS") && "bio_weight" %in% names(values)) {
+  } else if (identical(pd$label, "CAS-Supply adjusted") && "bio_weight" %in% names(values)) {
     label <- paste0(
       policy_name,
       "_WL", val("wl_weight"),
@@ -694,7 +726,7 @@ ui <- navbarPage(
   title = NULL,
 
   tabPanel(
-    title = "Run Experiment", value = "run",
+    title = "Run an Experiment", value = "run",
     fluidPage(
       tags$style(HTML("
         .weight-status {position: sticky; top: 15px;}
@@ -804,7 +836,7 @@ ui <- navbarPage(
           if (!/^[-+]?\\d*\\.?\\d+(e[-+]?\\d+)?$/i.test(raw)) return x;
           var num = Number(raw);
           if (!isFinite(num)) return x;
-          return num.toFixed(2);
+          return num.toFixed(4).replace(/(\\.\\d{2,}?)0+$/, '$1');
         }
 
         function labelForSliderIndex(vals, txt) {
@@ -1370,7 +1402,7 @@ ui <- navbarPage(
         tags$div(id = "stratification-hover-title", class = "stratification-hover-title"),
         tags$div(id = "stratification-hover-description", class = "stratification-hover-description")
       ),
-      h3("Run a saved experiment"),
+      h3("Run an Experiment"),
       fluidRow(
         column(
           width = 8,
@@ -1458,6 +1490,34 @@ ui <- navbarPage(
   ),
 
   tabPanel(
+    title = "Experiment Comparison", value = "comparison",
+    fluidPage(
+      h3("Compare saved experiments"),
+      fluidRow(
+        column(
+          width = 4,
+          selectInput("comparison_experiments", "Experiments", choices = character(0), multiple = TRUE),
+          tags$p(
+            class = "text-muted",
+            "Select multiple experiments. Remove individual experiments by backspacing."
+          ),
+          tags$div(
+            class = "comparison-stratification",
+            selectInput("comparison_name", "Stratified by", choices = NULL)
+          ),
+          uiOutput("comparison_download_ui")
+        ),
+        column(
+          width = 8,
+          tags$div(class = "result-card",
+                   h4(textOutput("comparison_title", inline = TRUE)),
+                   tableOutput("comparison_table"))
+        )
+      )
+    )
+  ),
+
+  tabPanel(
     title = "Saved Experiments", value = "saved",
     fluidPage(
       tags$div(
@@ -1486,33 +1546,6 @@ ui <- navbarPage(
               actionButton("save_label_edit", "Save", class = "btn-default")
             )
           )
-        )
-      )
-    )
-  ),
-
-  tabPanel(
-    title = "Experiment Comparison", value = "comparison",
-    fluidPage(
-      h3("Compare saved experiments"),
-      fluidRow(
-        column(
-          width = 4,
-          selectInput("comparison_experiments", "Experiments", choices = character(0), multiple = TRUE),
-          tags$p(
-            class = "text-muted",
-            "Select multiple experiments. Remove individual experiments by backspacing."
-          ),
-          tags$div(
-            class = "comparison-stratification",
-            selectInput("comparison_name", "Stratified by", choices = NULL)
-          )
-        ),
-        column(
-          width = 8,
-          tags$div(class = "result-card",
-                   h4(textOutput("comparison_title", inline = TRUE)),
-                   tableOutput("comparison_table"))
         )
       )
     )
@@ -1581,14 +1614,12 @@ server <- function(input, output, session) {
       class = "slider-grid",
       lapply(pd$weight_cols, function(w) {
         if (identical(mode, "default")) {
-          # In Amended-CAS, a default value may not be one of the permitted
-          # custom stops. Include that exact value while default mode is shown
-          # so the handle and label represent the true default weight.
+          # A policy default may not be one of the permitted custom stops.
+          # Include the exact default while default mode is shown so the
+          # disabled handle, its label, and the table all represent the same
+          # underlying weight.
           default_value <- round(as.numeric(pd$default_row[[w]]), 12)
-          vals <- pd$weight_values[[w]]
-          if (identical(pd$label, "Amended-CAS")) {
-            vals <- sort(unique(c(vals, default_value)))
-          }
+          vals <- sort(unique(c(pd$weight_values[[w]], default_value)))
           is_fixed <- length(vals) <= 1
           disabled <- TRUE
           slider_n <- max(1, length(vals))
@@ -2124,7 +2155,16 @@ server <- function(input, output, session) {
     }
   })
 
-  output$comparison_table <- renderTable({
+  output$comparison_download_ui <- renderUI({
+    req(length(input$comparison_experiments) > 0, input$comparison_name)
+    downloadButton(
+      "download_comparison_csv",
+      "Download comparison CSV",
+      class = "btn-primary"
+    )
+  })
+
+  comparison_table_data <- reactive({
     exps <- saved_experiments()
     req(length(input$comparison_experiments) > 0, input$comparison_name)
 
@@ -2196,7 +2236,38 @@ server <- function(input, output, session) {
     }
 
     out
+  })
+
+  output$comparison_table <- renderTable({
+    comparison_table_data()
   }, striped = TRUE, bordered = TRUE, spacing = "s")
+
+  output$download_comparison_csv <- downloadHandler(
+    filename = function() {
+      req(input$comparison_name)
+      paste0(
+        "COMET_Lung_comparison_",
+        safe_filename(display_name(input$comparison_name)),
+        "_",
+        format(Sys.time(), "%Y%m%d_%H%M%S"),
+        "_",
+        short_download_code(),
+        ".csv"
+      )
+    },
+    content = function(file) {
+      out <- comparison_download_table(comparison_table_data())
+      out <- add_csv_result_footnote(out)
+      write.csv(
+        out,
+        file,
+        row.names = FALSE,
+        na = "",
+        fileEncoding = "UTF-8"
+      )
+    },
+    contentType = "text/csv"
+  )
 }
 
 shinyApp(ui, server)
