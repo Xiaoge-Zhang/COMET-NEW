@@ -263,10 +263,13 @@ safe_filename <- function(x) {
 }
 
 format_weight_value <- function(x) {
-  out <- format(round(as.numeric(x), 4), scientific = FALSE, trim = TRUE)
-  out <- sub("\\.0+$", "", out)
-  out <- sub("(\\.[0-9]*?)0+$", "\\1", out)
-  out
+  # Display weights consistently to two digits after the decimal point.
+  # The underlying calculations still use the numeric CSV values.
+  ifelse(
+    is.na(as.numeric(x)),
+    "",
+    formatC(as.numeric(x), format = "f", digits = 2)
+  )
 }
 
 policy_label_for_experiment <- function(policy_label) {
@@ -396,8 +399,8 @@ display_name <- function(x) {
     male = "Sex",
     reg = "Census Subregions",
     wlauc_cat = "WLAUC Category",
-    wlauc_cat2 = "WLAUC Category",
-    `wlauc cat2` = "WLAUC Category"
+    wlauc_cat2 = "WLAUC Category (Expanded)",
+    `wlauc cat2` = "WLAUC Category (Expanded)"
   )
   ifelse(x %in% names(mapping), unname(mapping[x]), gsub("_", " ", x))
 }
@@ -524,11 +527,11 @@ result_palette <- function(n) {
 add_figure_watermark <- function() {
   usr <- par("usr")
   text(
-    x = usr[2],
-    y = usr[3] - 0.105 * diff(usr[3:4]),
+    x = usr[2] - 0.015 * diff(usr[1:2]),
+    y = usr[3] + 0.035 * diff(usr[3:4]),
     labels = "COMET-Lung Online",
     adj = c(1, 0),
-    xpd = NA,
+    xpd = FALSE,
     cex = 0.62,
     col = grDevices::gray(0.45)
   )
@@ -552,7 +555,35 @@ combined_result_table <- function(dat, stratification, mods) {
   do.call(rbind, out)
 }
 
-draw_result_figure <- function(d, stratification, mod_id) {
+csv_result_footnote_lines <- c(
+  "These simulated results are derived from the Computational Open-source Model for Evaluating Transplantation (COMET) developed under National Institutes of Health (NIH) National Heart Lung & Blood Institute (NHBI) grants R01HL153175 and R01HL153175.",
+  "For methodologic details of the models, please see:",
+  "Rose J, Gunsalus PR, Lehr CJ, Swiler MF, Dalton JE, Valapour M. A modular simulation framework for organ allocation. J Heart Lung Transplant. 2024 Aug;43(8):1326-1335. doi: 10.1016/j.healun.2024.04.063. Epub 2024 May 4. PMID: 38705499; PMCID: PMC11261589.",
+  "Gunsalus PR, Rose J, Lehr CJ, Valapour M, Dalton JE. Creating synthetic populations in transplantation: A Bayesian approach enabling simulation without registry re-sampling. PLoS One. 2024 Mar 21;19(3):e0296839. doi: 10.1371/journal.pone.0296839. PMID: 38512928; PMCID: PMC10956776.",
+  "Rose J, Gunsalus PR, Lehr CJ, Swiler MF, Dalton JE, Valapour M. A supply-based scoring approach to account for biological disadvantages in accessing lung transplant. J Heart Lung Transplant. 2025 Feb;44(2):193-201. doi: 10.1016/j.healun.2024.09.022. Epub 2024 Oct 15. PMID: 39412460; PMCID: PMC11840864."
+)
+
+add_csv_result_footnote <- function(out) {
+  if (!is.data.frame(out) || ncol(out) == 0) return(out)
+
+  blank_row <- as.data.frame(as.list(rep("", ncol(out))), stringsAsFactors = FALSE)
+  names(blank_row) <- names(out)
+
+  footnote_rows <- lapply(csv_result_footnote_lines, function(line) {
+    row <- as.data.frame(as.list(rep("", ncol(out))), stringsAsFactors = FALSE)
+    names(row) <- names(out)
+    row[[1]] <- line
+    row
+  })
+
+  do.call(rbind, c(list(out, blank_row), footnote_rows))
+}
+
+pptx_result_footnote_text <- function() {
+  paste(csv_result_footnote_lines, collapse = "\n\n")
+}
+
+draw_result_figure <- function(d, stratification, mod_id, watermark = FALSE) {
   outcome_label <- outcome_axis_label(mod_id)
   old_par <- par(no.readonly = TRUE)
   on.exit(par(old_par), add = TRUE)
@@ -585,7 +616,7 @@ draw_result_figure <- function(d, stratification, mod_id) {
       border = NA
     )
     lines(x, density, lwd = 2, col = color)
-    add_figure_watermark()
+    if (isTRUE(watermark)) add_figure_watermark()
     return(invisible(NULL))
   }
 
@@ -647,7 +678,7 @@ draw_result_figure <- function(d, stratification, mod_id) {
     median_value <- skew_quantiles(one$xi[1], one$omega[1], one$alpha[1], 0.50)
     points(i, median_value, pch = 19, cex = 0.9, col = "black")
   }
-  add_figure_watermark()
+  if (isTRUE(watermark)) add_figure_watermark()
 }
 
 experiment_display <- function(exp) {
@@ -768,15 +799,28 @@ ui <- navbarPage(
         .disabled-see-result {opacity:0.45; cursor:not-allowed;}
       ")),
       tags$script(HTML("
-        function compactNumber(x) {
+        function formatSliderWeightNumber(x) {
           var raw = (x || '').toString().replace(/,/g, '').trim();
           if (!/^[-+]?\\d*\\.?\\d+(e[-+]?\\d+)?$/i.test(raw)) return x;
           var num = Number(raw);
           if (!isFinite(num)) return x;
-          var out = num.toFixed(4);
-          out = out.replace(/\\.?0+$/, '');
-          if (out === '-0') out = '0';
-          return out;
+          return num.toFixed(2);
+        }
+
+        function labelForSliderIndex(vals, txt) {
+          var raw = (txt || '').toString().replace(/,/g, '').trim();
+
+          // The actual Shiny slider still uses index values 1, 2, 3, ...
+          // Internally, data-values stores the real CSV weights in the same order.
+          // Only integer labels in the valid index range are mapped.
+          if (!/^\\d+$/.test(raw)) return formatSliderWeightNumber(raw);
+
+          var idx = parseInt(raw, 10);
+          if (!isFinite(idx) || idx < 1 || idx > vals.length) {
+            return formatSliderWeightNumber(raw);
+          }
+
+          return formatSliderWeightNumber(vals[idx - 1]);
         }
 
         function applyAllowedValueLabels() {
@@ -784,24 +828,34 @@ ui <- navbarPage(
             var box = $(this);
             var valsRaw = box.attr('data-values') || '';
             if (!valsRaw.length) return;
+
             var vals = valsRaw.split('|');
-            function labelForIndex(txt) {
-              var raw = (txt || '').toString().replace(/,/g, '').trim();
 
-              // Ion.RangeSlider displays internal slider positions as integers
-              // because the real slider values are 1, 2, 3, ...
-              // Only those pure integer labels should be mapped to CSV weights.
-              // If the label is already a mapped decimal like 0.30, do not
-              // interpret it again as index 0.
-              if (!/^\\d+$/.test(raw)) return compactNumber(raw);
+            // Attach a native Ion.RangeSlider prettify callback when possible.
+            // Use box.find('input') instead of a complex selector so this line
+            // cannot break the entire JavaScript block.
+            try {
+              var sliderInput = box.find('input').first();
+              var ionSlider = sliderInput.data('ionRangeSlider');
+              var appliedVals = box.attr('data-prettify-values') || '';
 
-              var idx = parseInt(raw, 10);
-              if (!isFinite(idx)) return compactNumber(raw);
-              idx = Math.max(1, Math.min(vals.length, idx));
-              return compactNumber(vals[idx - 1]);
+              if (ionSlider && appliedVals !== valsRaw) {
+                ionSlider.update({
+                  prettify_enabled: true,
+                  prettify: function(num) {
+                    return labelForSliderIndex(vals, String(Math.round(Number(num))));
+                  }
+                });
+                box.attr('data-prettify-values', valsRaw);
+              }
+            } catch (e) {
+              // Fallback rewriting below still handles displayed labels.
             }
+
+            // Fallback and refresh pass. This also fixes labels drawn before
+            // the prettify callback was attached.
             box.find('.irs-min, .irs-max, .irs-single, .irs-from, .irs-to').each(function() {
-              $(this).text(labelForIndex($(this).text()));
+              $(this).text(labelForSliderIndex(vals, $(this).text()));
             });
           });
         }
@@ -1087,7 +1141,7 @@ ui <- navbarPage(
           ) {
             return {
               title: 'Diagnosis Groups',
-              description: 'Group A: Obstructive lung disease\nGroup B: Pulmonary vascular disease\nGroup C: Cystic fibrosis and immunodeficiency disorders\nGroup D: Restrictive lung disease'
+              description: 'Group A: Obstructive lung disease\\nGroup B: Pulmonary vascular disease\\nGroup C: Cystic fibrosis and immunodeficiency disorders\\nGroup D: Restrictive lung disease'
             };
           }
 
@@ -1873,7 +1927,7 @@ server <- function(input, output, session) {
           validate(need(nrow(d) > 0, "No figure is available."))
           grDevices::png(file, width = 1600, height = 1050, res = 150)
           on.exit(grDevices::dev.off(), add = TRUE)
-          draw_result_figure(d, input$result_name, current_mod)
+          draw_result_figure(d, input$result_name, current_mod, watermark = TRUE)
         }
       )
     })
@@ -1892,6 +1946,7 @@ server <- function(input, output, session) {
       dat <- experiment_skew()
       mods <- available_result_mods()
       out <- combined_result_table(dat, input$result_name, mods)
+      out <- add_csv_result_footnote(out)
       utils::write.csv(out, file, row.names = FALSE)
     }
   )
@@ -1920,7 +1975,7 @@ server <- function(input, output, session) {
 
         img <- tempfile(fileext = ".png")
         grDevices::png(img, width = 1600, height = 1050, res = 150)
-        draw_result_figure(d, input$result_name, mod_id)
+        draw_result_figure(d, input$result_name, mod_id, watermark = TRUE)
         grDevices::dev.off()
 
         ppt <- officer::add_slide(ppt, layout = "Blank", master = "Office Theme")
@@ -1930,6 +1985,18 @@ server <- function(input, output, session) {
           location = officer::ph_location(left = 0.55, top = 0.45, width = 9.2, height = 6.0)
         )
       }
+
+      ppt <- officer::add_slide(ppt, layout = "Blank", master = "Office Theme")
+      ppt <- officer::ph_with(
+        ppt,
+        value = "Notes and References",
+        location = officer::ph_location(left = 0.55, top = 0.35, width = 9.2, height = 0.45)
+      )
+      ppt <- officer::ph_with(
+        ppt,
+        value = pptx_result_footnote_text(),
+        location = officer::ph_location(left = 0.55, top = 0.95, width = 9.2, height = 5.8)
+      )
 
       print(ppt, target = file)
     }
