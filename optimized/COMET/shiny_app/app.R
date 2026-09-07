@@ -429,12 +429,20 @@ display_name <- function(x) {
     abo = "Blood type",
     age_cat = "Age category",
     male = "Sex",
-    reg = "Census Subregions",
+    reg = "Census Regions",
+    subreg = "Census Subregions",
     wlauc_cat = "WLAUC Category",
-    wlauc_cat2 = "WLAUC Category (Expanded)",
-    `wlauc cat2` = "WLAUC Category (Expanded)"
+    wlauc_cat2 = "WLAUC Category",
+    `wlauc cat2` = "WLAUC Category"
   )
   ifelse(x %in% names(mapping), unname(mapping[x]), gsub("_", " ", x))
+}
+
+available_stratification_names <- function(x) {
+  x <- unique(as.character(x))
+  # Remove the legacy WLAUC stratification whose lowest category is [0, 250).
+  # Keep wlauc_cat2 / "wlauc cat2", which is the expanded WLAUC definition.
+  x[!x %in% c("wlauc_cat")]
 }
 
 display_mod <- function(x) {
@@ -516,10 +524,16 @@ display_category <- function(name, value) {
     value[key %in% c("(65,Inf)", "(65,Inf]", "[65,Inf)", "[65,Inf]", "(65,+Inf)", "(65,+Inf]")] <- "(>65)"
   }
 
+  if (identical(name, "hgt_cat")) {
+    key <- gsub("\\s+", "", value)
+    value[grepl("^[\\(\\[]-Inf,62\\.2[\\)\\]]$", key)] <- "<62.2"
+    value[grepl("^[\\(\\[]70,(\\+)?Inf[\\)\\]]$", key)] <- ">70"
+  }
+
   # For all other displayed interval categories, replace any -Inf lower bound
   # with 0. This covers labels such as (-Inf,75), (-Inf,250], and any future
   # category with a different cutoff.
-  if (!identical(name, "age_cat")) {
+  if (!name %in% c("age_cat", "hgt_cat")) {
     value <- sub("^\\s*\\(-Inf\\s*,", "(0,", value)
     value <- sub("^\\s*\\[-Inf\\s*,", "[0,", value)
     value <- sub("^\\s*\\(-\\s*Inf\\s*,", "(0,", value)
@@ -1161,7 +1175,7 @@ ui <- navbarPage(
             normalized === 'wlauc category (expanded)'
           ) {
             return {
-              title: normalized === 'wlauc_cat2' || normalized === 'wlauc cat2' || normalized === 'wlauc category (expanded)' ? 'WLAUC Category (Expanded)' : 'WLAUC Category',
+              title: 'WLAUC Category',
               description: 'WLAUC = Waitlist Area Under the Curve, defined as the predicted number of days a candidate will survive without a transplant (Maximum = 365).'
             };
           }
@@ -1545,6 +1559,16 @@ ui <- navbarPage(
               tags$br(),
               actionButton("save_label_edit", "Save", class = "btn-default")
             )
+          ),
+          fluidRow(
+            column(
+              width = 12,
+              actionButton(
+                "delete_saved_exp",
+                "Delete Experiment",
+                class = "btn-danger btn-sm"
+              )
+            )
           )
         )
       )
@@ -1580,7 +1604,22 @@ server <- function(input, output, session) {
   })
 
   next_experiment_name <- reactive({
-    paste0("Experiment ", length(saved_experiments()) + 1)
+    exps <- saved_experiments()
+    if (length(exps) == 0) return("Experiment 1")
+
+    existing_names <- vapply(exps, function(x) x$name, character(1))
+    existing_numbers <- suppressWarnings(
+      as.integer(sub("^Experiment\\s+([0-9]+)$", "\\1", existing_names))
+    )
+    existing_numbers <- existing_numbers[is.finite(existing_numbers)]
+
+    next_number <- if (length(existing_numbers) == 0) {
+      length(exps) + 1L
+    } else {
+      max(existing_numbers) + 1L
+    }
+
+    paste0("Experiment ", next_number)
   })
 
   output$next_experiment_name <- renderText({
@@ -1595,12 +1634,10 @@ server <- function(input, output, session) {
 
   slider_label_with_hover <- function(w, fixed = FALSE) {
     label_text <- weight_labels[[w]]
-    hover_text <- if (w %in% names(weight_hover_info)) weight_hover_info[[w]] else ""
     tagList(
       tags$span(
         class = "weight-label-help",
         `data-weight-key` = w,
-        title = hover_text,
         label_text
       ),
       if (fixed) tags$span(" (fixed)")
@@ -1905,7 +1942,7 @@ server <- function(input, output, session) {
 
   observeEvent(experiment_skew(), {
     dat <- experiment_skew()
-    names_available <- unique(as.character(dat$name))
+    names_available <- available_stratification_names(dat$name)
     choices <- setNames(names_available, vapply(names_available, display_name, character(1)))
     selected <- if ("ov" %in% names_available) "ov" else names_available[1]
     updateSelectInput(session, "result_name", choices = choices, selected = selected)
@@ -2115,6 +2152,73 @@ server <- function(input, output, session) {
     showNotification("Label updated.", type = "message", duration = 3)
   })
 
+  observeEvent(input$delete_saved_exp, {
+    req(input$saved_experiment)
+    exps <- saved_experiments()
+    exp <- exps[[input$saved_experiment]]
+    req(exp)
+
+    showModal(
+      modalDialog(
+        title = "Delete saved experiment?",
+        tags$p(
+          "This will delete ",
+          tags$strong(experiment_display(exp)),
+          " from this session."
+        ),
+        tags$p("This action cannot be undone."),
+        footer = tagList(
+          modalButton("Cancel"),
+          actionButton(
+            "confirm_delete_saved_exp",
+            "Delete",
+            class = "btn-danger"
+          )
+        ),
+        easyClose = TRUE
+      )
+    )
+  })
+
+  observeEvent(input$confirm_delete_saved_exp, {
+    req(input$saved_experiment)
+    delete_key <- input$saved_experiment
+    exps <- saved_experiments()
+    exp <- exps[[delete_key]]
+    req(exp)
+
+    deleted_name <- experiment_display(exp)
+    exps[[delete_key]] <- NULL
+    saved_experiments(exps)
+
+    # If Result Detail was showing the deleted experiment, clear that reference.
+    if (identical(current_experiment_key(), delete_key)) {
+      current_experiment_key(NULL)
+    }
+
+    # Refresh both Saved Experiments and Experiment Comparison selectors.
+    remaining_keys <- names(exps)
+    next_selected <- if (length(remaining_keys) > 0) remaining_keys[[1]] else NULL
+    update_experiment_choices(exps, selected = next_selected)
+
+    if (length(remaining_keys) > 0) {
+      updateTextInput(
+        session,
+        "saved_label_edit",
+        value = exps[[next_selected]]$label
+      )
+    } else {
+      updateTextInput(session, "saved_label_edit", value = "")
+    }
+
+    removeModal()
+    showNotification(
+      paste0("Deleted ", deleted_name, "."),
+      type = "message",
+      duration = 4
+    )
+  })
+
   observeEvent(input$load_saved_exp, {
     req(input$saved_experiment)
     exps <- saved_experiments(); req(exps[[input$saved_experiment]])
@@ -2140,7 +2244,7 @@ server <- function(input, output, session) {
       pd$skew[pd$skew$params_1 == exp$params_1, , drop = FALSE]
     })
     dat <- do.call(rbind, dat_list)
-    names_available <- unique(as.character(dat$name))
+    names_available <- available_stratification_names(dat$name)
     choices <- setNames(names_available, vapply(names_available, display_name, character(1)))
     selected <- if (!is.null(input$comparison_name) && input$comparison_name %in% names_available) input$comparison_name else names_available[1]
     updateSelectInput(session, "comparison_name", choices = choices, selected = selected)
