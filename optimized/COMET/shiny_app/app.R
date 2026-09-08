@@ -2328,10 +2328,28 @@ server <- function(input, output, session) {
     for (i in seq_along(selected_exps)) {
       exp <- selected_exps[[i]]
       d <- experiment_data[[i]]
-      means <- skew_mean(d$xi, d$omega, d$alpha)
+
+      # Use the fitted-distribution median (50th percentile), matching
+      # Result Detail exactly, instead of the skew-normal mean.
+      medians <- vapply(seq_len(nrow(d)), function(j) {
+        skew_quantiles(
+          d$xi[j],
+          d$omega[j],
+          d$alpha[j],
+          probs = 0.50
+        )[[1]]
+      }, numeric(1))
+
       data_keys <- paste(as.character(d$mods_id), as.character(d$value), sep = "\r")
       keep <- !duplicated(data_keys)
-      lookup <- setNames(format_sig(means[keep], 2), data_keys[keep])
+
+      # Match Result Detail display precision: one decimal place.
+      median_text <- ifelse(
+        is.finite(medians),
+        formatC(medians, format = "f", digits = 1),
+        ""
+      )
+      lookup <- setNames(median_text[keep], data_keys[keep])
 
       col_nm <- experiment_display(exp)
       if (col_nm %in% used_names) col_nm <- paste0(col_nm, " (", exp$policy_label, ")")
